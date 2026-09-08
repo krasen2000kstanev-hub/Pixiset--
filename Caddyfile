@@ -1,0 +1,7 @@
+# Caddy fetches and renews Let's Encrypt certs automatically for {$DOMAIN}.
+# For local use, DOMAIN defaults to "localhost" (Caddy serves a local cert).
+
+{$DOMAIN} {
+	encode zstd gzip
+	reverse_proxy app:3000
+}

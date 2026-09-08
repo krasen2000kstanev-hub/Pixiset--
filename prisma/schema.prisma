@@ -1,0 +1,168 @@
+// Client Gallery – data model
+// Switch `provider` to "sqlite" + a file URL if you prefer the cheaper
+// SQLite + Litestream setup described in the README. The String[] fields
+// (notifyEmails, photoIds) then need to become plain comma-joined String.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+}
+
+enum GalleryStatus {
+  DRAFT
+  PUBLISHED
+}
+
+enum CoverLayout {
+  CENTER
+  LEFT
+  SPLIT
+}
+
+enum DownloadSize {
+  ORIGINAL
+  WEB
+}
+
+enum DownloadType {
+  SINGLE
+  BULK
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String
+  passwordHash String
+  role         Role     @default(ADMIN)
+  createdAt    DateTime @default(now())
+
+  galleries Gallery[]
+}
+
+model Gallery {
+  id          String        @id @default(cuid())
+  slug        String        @unique
+  title       String
+  description String?
+  status      GalleryStatus @default(DRAFT)
+
+  coverPhotoId String?
+  coverLayout  CoverLayout @default(CENTER)
+  accentColor  String      @default("#1a1a1a")
+
+  // Access control
+  passwordHash String?
+  requireEmail Boolean @default(false)
+  expiresAt    DateTime?
+
+  // Download control
+  downloadEnabled Boolean      @default(true)
+  downloadSize    DownloadSize @default(ORIGINAL)
+
+  // Email notifications (only effective when SES is configured)
+  notifyOnSelection    Boolean  @default(true)
+  notifyOnBulkDownload Boolean  @default(false)
+  notifyEmails         String[] @default([])
+
+  createdById String
+  createdBy   User   @relation(fields: [createdById], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  photos      Photo[]
+  visits      GalleryVisit[]
+  downloads   DownloadEvent[]
+  favorites   Favorite[]
+  submissions FavoriteSubmission[]
+
+  @@index([status])
+}
+
+model Photo {
+  id        String @id @default(cuid())
+  galleryId String
+  gallery   Gallery @relation(fields: [galleryId], references: [id], onDelete: Cascade)
+
+  filename    String
+  keyOriginal String
+  keyDisplay  String
+  keyThumb    String
+  width       Int
+  height      Int
+  bytes       Int
+  sortOrder   Int    @default(0)
+
+  createdAt DateTime @default(now())
+
+  favorites Favorite[]
+  downloads DownloadEvent[]
+
+  @@index([galleryId, sortOrder])
+}
+
+model GalleryVisit {
+  id        String  @id @default(cuid())
+  galleryId String
+  gallery   Gallery @relation(fields: [galleryId], references: [id], onDelete: Cascade)
+
+  visitorId String
+  email     String?
+  ip        String?
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  @@index([galleryId, createdAt])
+}
+
+model DownloadEvent {
+  id        String       @id @default(cuid())
+  galleryId String
+  gallery   Gallery      @relation(fields: [galleryId], references: [id], onDelete: Cascade)
+  photoId   String?
+  photo     Photo?       @relation(fields: [photoId], references: [id], onDelete: SetNull)
+  type      DownloadType
+
+  visitorId String?
+  email     String?
+  ip        String?
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  @@index([galleryId, createdAt])
+}
+
+model Favorite {
+  id        String  @id @default(cuid())
+  galleryId String
+  gallery   Gallery @relation(fields: [galleryId], references: [id], onDelete: Cascade)
+  photoId   String
+  photo     Photo   @relation(fields: [photoId], references: [id], onDelete: Cascade)
+  visitorId String
+  createdAt DateTime @default(now())
+
+  @@unique([galleryId, photoId, visitorId])
+  @@index([galleryId, visitorId])
+}
+
+model FavoriteSubmission {
+  id        String   @id @default(cuid())
+  galleryId String
+  gallery   Gallery  @relation(fields: [galleryId], references: [id], onDelete: Cascade)
+  name      String
+  email     String
+  note      String?
+  photoIds  String[]
+  createdAt DateTime @default(now())
+
+  @@index([galleryId, createdAt])
+}
