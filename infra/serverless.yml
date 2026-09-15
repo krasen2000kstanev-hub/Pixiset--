@@ -1,0 +1,95 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Low-cost serverless foundation for Client Gallery
+
+Globals:
+  Function:
+    Runtime: nodejs22.x
+    Timeout: 15
+    MemorySize: 128
+    Environment:
+      Variables:
+        GALLERIES_TABLE: !Ref GalleriesTable
+        PHOTOS_TABLE: !Ref PhotosTable
+        AUDIT_TABLE: !Ref AuditTable
+        PHOTO_BUCKET: !Ref PhotoBucket
+
+Resources:
+  GalleryApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      CorsConfiguration:
+        AllowOrigins: ['*']
+        AllowHeaders: ['content-type', 'authorization']
+        AllowMethods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS']
+
+  ApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../lambda/
+      Handler: handler.handler
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref GalleryApi
+            Path: /{proxy+}
+            Method: ANY
+      Policies:
+        - DynamoDBCrudPolicy: { TableName: !Ref GalleriesTable }
+        - DynamoDBCrudPolicy: { TableName: !Ref PhotosTable }
+        - DynamoDBCrudPolicy: { TableName: !Ref AuditTable }
+        - S3CrudPolicy: { BucketName: !Ref PhotoBucket }
+
+  TeamUsers:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UsernameAttributes: [email]
+      AutoVerifiedAttributes: []
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 12
+          RequireUppercase: true
+          RequireLowercase: true
+          RequireNumbers: true
+  TeamClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      UserPoolId: !Ref TeamUsers
+      GenerateSecret: false
+
+  GalleriesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions: [{ AttributeName: id, AttributeType: S }]
+      KeySchema: [{ AttributeName: id, KeyType: HASH }]
+      PointInTimeRecoverySpecification: { PointInTimeRecoveryEnabled: true }
+  PhotosTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions: [{ AttributeName: id, AttributeType: S }]
+      KeySchema: [{ AttributeName: id, KeyType: HASH }]
+  AuditTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions: [{ AttributeName: id, AttributeType: S }]
+      KeySchema: [{ AttributeName: id, KeyType: HASH }]
+
+  PhotoBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketEncryption: { ServerSideEncryptionConfiguration: [{ ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 } }] }
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+Outputs:
+  ApiUrl: { Value: !Sub 'https://${GalleryApi}.execute-api.${AWS::Region}.amazonaws.com' }
+  UserPoolId: { Value: !Ref TeamUsers }
+  UserPoolClientId: { Value: !Ref TeamClient }
+  PhotoBucketName: { Value: !Ref PhotoBucket }
