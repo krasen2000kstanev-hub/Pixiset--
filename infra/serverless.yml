@@ -64,12 +64,20 @@ Resources:
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions: [{ AttributeName: id, AttributeType: S }]
       KeySchema: [{ AttributeName: id, KeyType: HASH }]
+      GlobalSecondaryIndexes:
+        - IndexName: createdById-updatedAt-index
+          KeySchema: [{ AttributeName: createdById, KeyType: HASH }, { AttributeName: updatedAt, KeyType: RANGE }]
+          Projection: { ProjectionType: ALL }
   PhotosTable:
     Type: AWS::DynamoDB::Table
     Properties:
       BillingMode: PAY_PER_REQUEST
-      AttributeDefinitions: [{ AttributeName: id, AttributeType: S }]
+      AttributeDefinitions: [{ AttributeName: id, AttributeType: S }, { AttributeName: galleryId, AttributeType: S }, { AttributeName: sortOrder, AttributeType: N }]
       KeySchema: [{ AttributeName: id, KeyType: HASH }]
+      GlobalSecondaryIndexes:
+        - IndexName: galleryId-sortOrder-index
+          KeySchema: [{ AttributeName: galleryId, KeyType: HASH }, { AttributeName: sortOrder, KeyType: RANGE }]
+          Projection: { ProjectionType: ALL }
   AuditTable:
     Type: AWS::DynamoDB::Table
     Properties:
