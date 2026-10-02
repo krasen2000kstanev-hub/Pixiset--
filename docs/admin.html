@@ -22,7 +22,7 @@ const CLIENT='3fleqt4pgl9a7hr5snddok64qs';
 const REDIRECT=location.origin+location.pathname;
 let token=sessionStorage.getItem('pixiset_token');
 if(location.hash.includes('access_token=')){token=new URLSearchParams(location.hash.slice(1)).get('access_token');sessionStorage.setItem('pixiset_token',token);history.replaceState({},'',REDIRECT)}
-const api=(path,opt={})=>fetch(API+path,{...opt,headers:{'content-type':'application/json',Authorization:`Bearer ${token}`}}).then(async r=>{if(!r.ok)throw new Error(`${r.status}: ${await r.text()}`);return r.json()});
+const api=(path,opt={})=>fetch(API+path,{...opt,headers:{'content-type':'application/json',Authorization:`Bearer ${token}`}}).then(async r=>{if(r.status===401){sessionStorage.removeItem('pixiset_token');token=null;show();throw new Error('Сесията е изтекла. Влез отново.')}if(!r.ok)throw new Error(`${r.status}: ${await r.text()}`);return r.json()});
 function show(){document.querySelector('#login').hidden=!!token;document.querySelector('#app').hidden=!token;if(token)load()}
 document.querySelector('#loginButton').onclick=()=>location.href=`${COGNITO}/oauth2/authorize?response_type=token&client_id=${CLIENT}&redirect_uri=${encodeURIComponent(REDIRECT)}&scope=openid`;
 document.querySelector('#create').onsubmit=async e=>{e.preventDefault();const f=new FormData(e.target);try{await api('/admin/galleries',{method:'POST',body:JSON.stringify({title:f.get('title'),description:f.get('description')})});e.target.reset();load()}catch(err){alert(err.message)}};
