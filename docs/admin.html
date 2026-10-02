@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="bg">
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Pixiset — Admin</title>
+<style>
+body{margin:0;background:#171614;color:#f5f1e8;font:16px system-ui,sans-serif}main{max-width:760px;margin:auto;padding:48px 6vw}h1{font:48px Georgia,serif;font-weight:400}.card{border:1px solid #ffffff22;padding:24px;margin:24px 0;background:#ffffff08}input,button{font:inherit;padding:12px;border-radius:4px;border:1px solid #ffffff33;background:#ffffff12;color:inherit}input{display:block;width:100%;margin:8px 0 12px;box-sizing:border-box}button{cursor:pointer;background:#d7ad76;color:#171614;border:0;font-weight:600}.muted{color:#ffffff99}.gallery{padding:12px 0;border-top:1px solid #ffffff22}
+</style>
+<main>
+  <p class="muted">PIX ISET / TEAM</p><h1>Admin gallery</h1>
+  <div id="login" class="card"><p>Влез като член на екипа, за да управляваш галериите.</p><button id="loginButton">Вход с AWS</button></div>
+  <section id="app" hidden>
+    <div class="card"><form id="create"><label>Име на галерията<input name="title" required placeholder="Сватба — Иванови"></label><label>Описание<input name="description" placeholder="Септември 2026"></label><button>Създай галерия</button></form></div>
+    <div class="card"><h2>Моите галерии</h2><div id="list" class="muted">Зареждане…</div></div>
+  </section>
+</main>
+<script>
+const API='https://9hi9hsm4n1.execute-api.us-east-1.amazonaws.com';
+const COGNITO='https://pixiset-gallery-674948790853.auth.us-east-1.amazoncognito.com';
+const CLIENT='3fleqt4pgl9a7hr5snddok64qs';
+const REDIRECT=location.origin+location.pathname;
+let token=sessionStorage.getItem('pixiset_token');
+if(location.hash.includes('access_token=')){token=new URLSearchParams(location.hash.slice(1)).get('access_token');sessionStorage.setItem('pixiset_token',token);history.replaceState({},'',REDIRECT)}
+const api=(path,opt={})=>fetch(API+path,{...opt,headers:{'content-type':'application/json',Authorization:`Bearer ${token}`}}).then(async r=>{if(!r.ok)throw new Error(`${r.status}: ${await r.text()}`);return r.json()});
+function show(){document.querySelector('#login').hidden=!!token;document.querySelector('#app').hidden=!token;if(token)load()}
+document.querySelector('#loginButton').onclick=()=>location.href=`${COGNITO}/oauth2/authorize?response_type=token&client_id=${CLIENT}&redirect_uri=${encodeURIComponent(REDIRECT)}&scope=openid`;
+document.querySelector('#create').onsubmit=async e=>{e.preventDefault();const f=new FormData(e.target);try{await api('/admin/galleries',{method:'POST',body:JSON.stringify({title:f.get('title'),description:f.get('description')})});e.target.reset();load()}catch(err){alert(err.message)}};
+async function load(){const box=document.querySelector('#list');try{const data=await api('/admin/galleries');box.innerHTML=data.galleries.length?data.galleries.map(g=>`<div class="gallery"><strong>${g.title||'Без име'}</strong><br><span class="muted">${g.status} · ${g.id}</span></div>`).join(''):'Все още няма галерии.'}catch(err){box.textContent=err.message}}
+show();
+</script>
