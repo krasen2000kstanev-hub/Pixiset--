@@ -1,5 +1,5 @@
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
-import { DynamoDBDocumentClient, DeleteCommand, GetCommand, PutCommand, QueryCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
+import { DynamoDBDocumentClient, DeleteCommand, GetCommand, PutCommand, QueryCommand, ScanCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { randomUUID } from "node:crypto";
@@ -20,12 +20,13 @@ export async function handler(event) {
 
     if (event.requestContext?.http?.method === "GET" && p.startsWith("/galleries/")) {
       const id = p.split("/")[2];
-      const result = await db.send(new GetCommand({ TableName: process.env.GALLERIES_TABLE, Key: { id } }));
-      if (!result.Item || result.Item.status !== "PUBLISHED") return json({ error: "not-found" }, 404);
-      const photos = await db.send(new QueryCommand({ TableName: process.env.PHOTOS_TABLE, IndexName: "galleryId-sortOrder-index", KeyConditionExpression: "galleryId = :g", ExpressionAttributeValues: { ":g": id } }));
-      await audit(event, "CLIENT_VISIT", { galleryId: id });
+      const result = p.startsWith("/galleries/slug/") ? await db.send(new ScanCommand({ TableName: process.env.GALLERIES_TABLE, FilterExpression: "slug = :s", ExpressionAttributeValues: { ":s": decodeURIComponent(p.split("/")[3] || "") } })) : await db.send(new GetCommand({ TableName: process.env.GALLERIES_TABLE, Key: { id } }));
+      const galleryItem = result.Item || result.Items?.[0];
+      if (!galleryItem || galleryItem.status !== "PUBLISHED") return json({ error: "not-found" }, 404);
+      const photos = await db.send(new QueryCommand({ TableName: process.env.PHOTOS_TABLE, IndexName: "galleryId-sortOrder-index", KeyConditionExpression: "galleryId = :g", ExpressionAttributeValues: { ":g": galleryItem.id } }));
+      await audit(event, "CLIENT_VISIT", { galleryId: galleryItem.id });
       const visiblePhotos = await Promise.all((photos.Items || []).map(async photo => ({ ...photo, url: await getSignedUrl(s3, new GetObjectCommand({ Bucket: process.env.PHOTO_BUCKET, Key: photo.key }), { expiresIn: 900 }) })));
-      return json({ gallery: result.Item, photos: visiblePhotos });
+      return json({ gallery: galleryItem, photos: visiblePhotos });
     }
 
     const actor = requireTeam(event);
@@ -49,7 +50,9 @@ export async function handler(event) {
     }
     if (event.requestContext?.http?.method === "PATCH" && p.match(/^\/admin\/galleries\/[^/]+$/)) {
       const galleryId = p.split("/")[3]; const input = body(event);
-      const result = await db.send(new UpdateCommand({ TableName: process.env.GALLERIES_TABLE, Key: { id: galleryId }, UpdateExpression: input.sets ? "SET sets = :s, updatedAt = :u" : "SET coverPhotoId = :c, updatedAt = :u", ExpressionAttributeValues: input.sets ? { ":s": input.sets, ":u": new Date().toISOString() } : { ":c": input.coverPhotoId, ":u": new Date().toISOString() }, ReturnValues: "ALL_NEW" }));
+      const expression = input.slug ? "SET slug = :s, updatedAt = :u" : input.sets ? "SET sets = :s, updatedAt = :u" : "SET coverPhotoId = :c, updatedAt = :u";
+      const values = input.slug ? { ":s": input.slug, ":u": new Date().toISOString() } : input.sets ? { ":s": input.sets, ":u": new Date().toISOString() } : { ":c": input.coverPhotoId, ":u": new Date().toISOString() };
+      const result = await db.send(new UpdateCommand({ TableName: process.env.GALLERIES_TABLE, Key: { id: galleryId }, UpdateExpression: expression, ExpressionAttributeValues: values, ReturnValues: "ALL_NEW" }));
       await audit(event, "GALLERY_COVER_CHANGED", { galleryId, photoId: input.coverPhotoId }); return json({ gallery: result.Attributes });
     }
     if (event.requestContext?.http?.method === "POST" && p.match(/^\/admin\/galleries\/[^/]+\/upload$/)) {
