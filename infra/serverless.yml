@@ -18,6 +18,15 @@ Resources:
   GalleryApi:
     Type: AWS::Serverless::HttpApi
     Properties:
+      Auth:
+        DefaultAuthorizer: TeamAuth
+        Authorizers:
+          TeamAuth:
+            JwtConfiguration:
+              issuer: !Sub 'https://cognito-idp.${AWS::Region}.amazonaws.com/${TeamUsers}'
+              audience:
+                - !Ref TeamClient
+            IdentitySource: '$request.header.Authorization'
       CorsConfiguration:
         AllowOrigins: ['*']
         AllowHeaders: ['content-type', 'authorization']
@@ -33,8 +42,16 @@ Resources:
           Type: HttpApi
           Properties:
             ApiId: !Ref GalleryApi
-            Path: /{proxy+}
+            Path: /admin/{proxy+}
             Method: ANY
+        PublicGallery:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref GalleryApi
+            Path: /galleries/{id}
+            Method: GET
+            Auth:
+              Authorizer: NONE
       Policies:
         - DynamoDBCrudPolicy: { TableName: !Ref GalleriesTable }
         - DynamoDBCrudPolicy: { TableName: !Ref PhotosTable }
