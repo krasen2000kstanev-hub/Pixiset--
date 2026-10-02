@@ -31,7 +31,11 @@ export async function handler(event) {
     const actor = requireTeam(event);
     if (event.requestContext?.http?.method === "GET" && p === "/admin/galleries") {
       const result = await db.send(new QueryCommand({ TableName: process.env.GALLERIES_TABLE, IndexName: "createdById-updatedAt-index", KeyConditionExpression: "createdById = :u", ExpressionAttributeValues: { ":u": actor.sub } }));
-      return json({ galleries: result.Items || [] });
+      const galleries = await Promise.all((result.Items || []).map(async gallery => {
+        const photos = await db.send(new QueryCommand({ TableName: process.env.PHOTOS_TABLE, IndexName: "galleryId-sortOrder-index", KeyConditionExpression: "galleryId = :g", ExpressionAttributeValues: { ":g": gallery.id }, ProjectionExpression: "id, #s", ExpressionAttributeNames: { "#s": "size" } }));
+        return { ...gallery, photoCount: (photos.Items || []).length, photoBytes: (photos.Items || []).reduce((n, photo) => n + (Number(photo.size) || 0), 0) };
+      }));
+      return json({ galleries });
     }
     if (event.requestContext?.http?.method === "GET" && p.match(/^\/admin\/galleries\/[^/]+\/photos$/)) {
       const galleryId = p.split("/")[3];
