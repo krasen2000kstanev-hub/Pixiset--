@@ -60,6 +60,14 @@ Resources:
             Method: GET
             Auth:
               Authorizer: NONE
+        PublicDownload:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref GalleryApi
+            Path: /download
+            Method: GET
+            Auth:
+              Authorizer: NONE
       Policies:
         - DynamoDBCrudPolicy: { TableName: !Ref GalleriesTable }
         - DynamoDBCrudPolicy: { TableName: !Ref PhotosTable }
