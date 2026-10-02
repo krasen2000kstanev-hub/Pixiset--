@@ -1,5 +1,5 @@
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
-import { DynamoDBDocumentClient, GetCommand, PutCommand, QueryCommand } from "@aws-sdk/lib-dynamodb";
+import { DynamoDBDocumentClient, GetCommand, PutCommand, QueryCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { randomUUID } from "node:crypto";
@@ -40,11 +40,17 @@ export async function handler(event) {
     if (event.requestContext?.http?.method === "GET" && p.match(/^\/admin\/galleries\/[^/]+\/photos$/)) {
       const galleryId = p.split("/")[3];
       const result = await db.send(new QueryCommand({ TableName: process.env.PHOTOS_TABLE, IndexName: "galleryId-sortOrder-index", KeyConditionExpression: "galleryId = :g", ExpressionAttributeValues: { ":g": galleryId } }));
-      return json({ photos: result.Items || [] });
+      const photos = await Promise.all((result.Items || []).map(async photo => ({ ...photo, url: await getSignedUrl(s3, new GetObjectCommand({ Bucket: process.env.PHOTO_BUCKET, Key: photo.key }), { expiresIn: 900 }) })));
+      return json({ photos });
     }
     if (event.requestContext?.http?.method === "POST" && p === "/admin/galleries") {
       const input = body(event); const id = randomUUID(); const item = { id, slug: input.slug || id, title: input.title, description: input.description || null, status: "DRAFT", createdById: actor.sub, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
       await db.send(new PutCommand({ TableName: process.env.GALLERIES_TABLE, Item: item })); await audit(event, "GALLERY_CREATED", { galleryId: id }); return json({ gallery: item }, 201);
+    }
+    if (event.requestContext?.http?.method === "PATCH" && p.match(/^\/admin\/galleries\/[^/]+$/)) {
+      const galleryId = p.split("/")[3]; const input = body(event);
+      const result = await db.send(new UpdateCommand({ TableName: process.env.GALLERIES_TABLE, Key: { id: galleryId }, UpdateExpression: "SET coverPhotoId = :c, updatedAt = :u", ExpressionAttributeValues: { ":c": input.coverPhotoId, ":u": new Date().toISOString() }, ReturnValues: "ALL_NEW" }));
+      await audit(event, "GALLERY_COVER_CHANGED", { galleryId, photoId: input.coverPhotoId }); return json({ gallery: result.Attributes });
     }
     if (event.requestContext?.http?.method === "POST" && p.match(/^\/admin\/galleries\/[^/]+\/upload$/)) {
       const galleryId = p.split("/")[3]; const input = body(event); const photoId = randomUUID(); const key = `originals/${galleryId}/${photoId}/${input.filename || "photo.jpg"}`;
