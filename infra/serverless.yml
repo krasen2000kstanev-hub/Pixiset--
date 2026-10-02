@@ -44,6 +44,14 @@ Resources:
             ApiId: !Ref GalleryApi
             Path: /admin/{proxy+}
             Method: ANY
+        Options:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref GalleryApi
+            Path: /admin/{proxy+}
+            Method: OPTIONS
+            Auth:
+              Authorizer: NONE
         PublicGallery:
           Type: HttpApi
           Properties:

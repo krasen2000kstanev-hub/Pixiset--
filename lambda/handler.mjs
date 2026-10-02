@@ -6,7 +6,7 @@ import { randomUUID } from "node:crypto";
 
 const db = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 const s3 = new S3Client({});
-const json = (body, statusCode = 200) => ({ statusCode, headers: { "content-type": "application/json", "access-control-allow-origin": "*" }, body: JSON.stringify(body) });
+const json = (body, statusCode = 200) => ({ statusCode, headers: { "content-type": "application/json", "access-control-allow-origin": "*", "access-control-allow-headers": "content-type,authorization", "access-control-allow-methods": "GET,POST,PATCH,DELETE,OPTIONS" }, body: JSON.stringify(body) });
 const path = (event) => event.rawPath || event.requestContext?.http?.path || "/";
 const body = (event) => event.body ? JSON.parse(event.isBase64Encoded ? Buffer.from(event.body, "base64") : event.body) : {};
 const claims = (event) => event.requestContext?.authorizer?.jwt?.claims || {};
