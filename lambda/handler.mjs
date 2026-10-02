@@ -33,6 +33,11 @@ export async function handler(event) {
       const result = await db.send(new QueryCommand({ TableName: process.env.GALLERIES_TABLE, IndexName: "createdById-updatedAt-index", KeyConditionExpression: "createdById = :u", ExpressionAttributeValues: { ":u": actor.sub } }));
       return json({ galleries: result.Items || [] });
     }
+    if (event.requestContext?.http?.method === "GET" && p.match(/^\/admin\/galleries\/[^/]+\/photos$/)) {
+      const galleryId = p.split("/")[3];
+      const result = await db.send(new QueryCommand({ TableName: process.env.PHOTOS_TABLE, IndexName: "galleryId-sortOrder-index", KeyConditionExpression: "galleryId = :g", ExpressionAttributeValues: { ":g": galleryId } }));
+      return json({ photos: result.Items || [] });
+    }
     if (event.requestContext?.http?.method === "POST" && p === "/admin/galleries") {
       const input = body(event); const id = randomUUID(); const item = { id, slug: input.slug || id, title: input.title, description: input.description || null, status: "DRAFT", createdById: actor.sub, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
       await db.send(new PutCommand({ TableName: process.env.GALLERIES_TABLE, Item: item })); await audit(event, "GALLERY_CREATED", { galleryId: id }); return json({ gallery: item }, 201);
@@ -40,7 +45,7 @@ export async function handler(event) {
     if (event.requestContext?.http?.method === "POST" && p.match(/^\/admin\/galleries\/[^/]+\/upload$/)) {
       const galleryId = p.split("/")[3]; const input = body(event); const photoId = randomUUID(); const key = `originals/${galleryId}/${photoId}/${input.filename || "photo.jpg"}`;
       const url = await getSignedUrl(s3, new PutObjectCommand({ Bucket: process.env.PHOTO_BUCKET, Key: key, ContentType: input.contentType || "application/octet-stream" }), { expiresIn: 600 });
-      await db.send(new PutCommand({ TableName: process.env.PHOTOS_TABLE, Item: { id: photoId, galleryId, key, filename: input.filename || "photo.jpg", contentType: input.contentType || "application/octet-stream", sortOrder: Date.now(), createdAt: new Date().toISOString(), createdById: actor.sub } }));
+      await db.send(new PutCommand({ TableName: process.env.PHOTOS_TABLE, Item: { id: photoId, galleryId, key, filename: input.filename || "photo.jpg", size: Number(input.size) || 0, contentType: input.contentType || "application/octet-stream", sortOrder: Date.now(), createdAt: new Date().toISOString(), createdById: actor.sub } }));
       await audit(event, "PHOTO_UPLOAD_URL_CREATED", { galleryId, photoId }); return json({ photoId, key, url });
     }
     return json({ error: "not-found" }, 404);
