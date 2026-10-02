@@ -1,5 +1,5 @@
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
-import { DynamoDBDocumentClient, GetCommand, PutCommand, QueryCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
+import { DynamoDBDocumentClient, DeleteCommand, GetCommand, PutCommand, QueryCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { randomUUID } from "node:crypto";
@@ -58,6 +58,12 @@ export async function handler(event) {
       await db.send(new PutCommand({ TableName: process.env.PHOTOS_TABLE, Item: { id: photoId, galleryId, key, filename: input.filename || "photo.jpg", setName: input.setName || "Highlights", size: Number(input.size) || 0, contentType: input.contentType || "application/octet-stream", sortOrder: Date.now(), createdAt: new Date().toISOString(), createdById: actor.sub } }));
       await audit(event, "PHOTO_UPLOAD_URL_CREATED", { galleryId, photoId }); return json({ photoId, key, url });
     }
+    if (event.requestContext?.http?.method === "PATCH" && p.match(/^\/admin\/photos\/[^/]+$/)) {
+      const photoId = p.split("/")[3]; const input = body(event); const names = []; if (input.filename) names.push("filename = :f"); if (input.setName) names.push("setName = :s");
+      if (!names.length) return json({ error: "nothing-to-update" }, 400); const values = {}; if (input.filename) values[":f"] = input.filename; if (input.setName) values[":s"] = input.setName;
+      const result = await db.send(new UpdateCommand({ TableName: process.env.PHOTOS_TABLE, Key: { id: photoId }, UpdateExpression: `SET ${names.join(", ")}`, ExpressionAttributeValues: values, ReturnValues: "ALL_NEW" })); return json({ photo: result.Attributes });
+    }
+    if (event.requestContext?.http?.method === "DELETE" && p.match(/^\/admin\/photos\/[^/]+$/)) { const photoId = p.split("/")[3]; await db.send(new DeleteCommand({ TableName: process.env.PHOTOS_TABLE, Key: { id: photoId } })); return json({ ok: true }); }
     return json({ error: "not-found" }, 404);
   } catch (error) { return json({ error: error.message || "server-error" }, error.statusCode || 500); }
 }
