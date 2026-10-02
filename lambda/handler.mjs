@@ -51,9 +51,10 @@ export async function handler(event) {
     }
     if (event.requestContext?.http?.method === "PATCH" && p.match(/^\/admin\/galleries\/[^/]+$/)) {
       const galleryId = p.split("/")[3]; const input = body(event);
-      const expression = input.slug ? "SET slug = :s, updatedAt = :u" : input.sets ? "SET sets = :s, updatedAt = :u" : "SET coverPhotoId = :c, updatedAt = :u";
-      const values = input.slug ? { ":s": input.slug, ":u": new Date().toISOString() } : input.sets ? { ":s": input.sets, ":u": new Date().toISOString() } : { ":c": input.coverPhotoId, ":u": new Date().toISOString() };
-      const result = await db.send(new UpdateCommand({ TableName: process.env.GALLERIES_TABLE, Key: { id: galleryId }, UpdateExpression: expression, ExpressionAttributeValues: values, ReturnValues: "ALL_NEW" }));
+      const expression = input.status ? "SET #st = :st, updatedAt = :u" : input.slug ? "SET slug = :s, updatedAt = :u" : input.sets ? "SET sets = :s, updatedAt = :u" : "SET coverPhotoId = :c, updatedAt = :u";
+      const values = input.status ? { ":st": input.status, ":u": new Date().toISOString() } : input.slug ? { ":s": input.slug, ":u": new Date().toISOString() } : input.sets ? { ":s": input.sets, ":u": new Date().toISOString() } : { ":c": input.coverPhotoId, ":u": new Date().toISOString() };
+      const names = input.status ? { "#st": "status" } : undefined;
+      const result = await db.send(new UpdateCommand({ TableName: process.env.GALLERIES_TABLE, Key: { id: galleryId }, UpdateExpression: expression, ExpressionAttributeNames: names, ExpressionAttributeValues: values, ReturnValues: "ALL_NEW" }));
       await audit(event, "GALLERY_COVER_CHANGED", { galleryId, photoId: input.coverPhotoId }); return json({ gallery: result.Attributes });
     }
     if (event.requestContext?.http?.method === "POST" && p.match(/^\/admin\/galleries\/[^/]+\/upload$/)) {
