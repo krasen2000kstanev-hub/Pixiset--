@@ -17,6 +17,7 @@ export async function handler(event) {
   try {
     const p = path(event);
     if (event.requestContext?.http?.method === "OPTIONS") return json({ ok: true });
+    if (event.requestContext?.http?.method === "GET" && p === "/download") { const key = event.queryStringParameters?.key; if (!key || !key.startsWith("originals/")) return json({ error: "invalid-key" }, 400); const found = await db.send(new ScanCommand({ TableName: process.env.PHOTOS_TABLE, FilterExpression: "#k = :k", ExpressionAttributeNames: { "#k": "key" }, ExpressionAttributeValues: { ":k": key }, ProjectionExpression: "galleryId, #k" })); const photo = found.Items?.[0]; if (!photo) return json({ error: "not-found" }, 404); const gallery = await db.send(new GetCommand({ TableName: process.env.GALLERIES_TABLE, Key: { id: photo.galleryId } })); if (gallery.Item?.status !== "PUBLISHED") return json({ error: "not-found" }, 404); const url = await getSignedUrl(s3, new GetObjectCommand({ Bucket: process.env.PHOTO_BUCKET, Key: key, ResponseContentDisposition: "attachment" }), { expiresIn: 300 }); return json({ url }); }
 
     if (event.requestContext?.http?.method === "GET" && p.startsWith("/galleries/")) {
       const id = p.split("/")[2];
