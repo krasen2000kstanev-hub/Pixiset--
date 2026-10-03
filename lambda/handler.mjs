@@ -1,6 +1,6 @@
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient, DeleteCommand, GetCommand, PutCommand, QueryCommand, ScanCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
-import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { randomUUID } from "node:crypto";
 
@@ -26,7 +26,7 @@ export async function handler(event) {
       if (!galleryItem || galleryItem.status !== "PUBLISHED") return json({ error: "not-found" }, 404);
       const photos = await db.send(new QueryCommand({ TableName: process.env.PHOTOS_TABLE, IndexName: "galleryId-sortOrder-index", KeyConditionExpression: "galleryId = :g", ExpressionAttributeValues: { ":g": galleryItem.id } }));
       await audit(event, "CLIENT_VISIT", { galleryId: galleryItem.id });
-      const visiblePhotos = await Promise.all((photos.Items || []).map(async photo => ({ ...photo, url: await getSignedUrl(s3, new GetObjectCommand({ Bucket: process.env.PHOTO_BUCKET, Key: photo.key }), { expiresIn: 900 }) })));
+      const visiblePhotos = await Promise.all((photos.Items || []).map(async photo => ({ ...photo, url: await getSignedUrl(s3, new GetObjectCommand({ Bucket: process.env.PHOTO_BUCKET, Key: photo.thumbKey || photo.key }), { expiresIn: 900 }), originalUrl: await getSignedUrl(s3, new GetObjectCommand({ Bucket: process.env.PHOTO_BUCKET, Key: photo.key }), { expiresIn: 900 }) })));
       return json({ gallery: galleryItem, photos: visiblePhotos });
     }
 
@@ -42,7 +42,7 @@ export async function handler(event) {
     if (event.requestContext?.http?.method === "GET" && p.match(/^\/admin\/galleries\/[^/]+\/photos$/)) {
       const galleryId = p.split("/")[3];
       const result = await db.send(new QueryCommand({ TableName: process.env.PHOTOS_TABLE, IndexName: "galleryId-sortOrder-index", KeyConditionExpression: "galleryId = :g", ExpressionAttributeValues: { ":g": galleryId } }));
-      const photos = await Promise.all((result.Items || []).map(async photo => ({ ...photo, url: await getSignedUrl(s3, new GetObjectCommand({ Bucket: process.env.PHOTO_BUCKET, Key: photo.key }), { expiresIn: 900 }) })));
+      const photos = await Promise.all((result.Items || []).map(async photo => ({ ...photo, url: await getSignedUrl(s3, new GetObjectCommand({ Bucket: process.env.PHOTO_BUCKET, Key: photo.thumbKey || photo.key }), { expiresIn: 900 }), originalUrl: await getSignedUrl(s3, new GetObjectCommand({ Bucket: process.env.PHOTO_BUCKET, Key: photo.key }), { expiresIn: 900 }) })));
       return json({ photos });
     }
     if (event.requestContext?.http?.method === "POST" && p === "/admin/galleries") {
@@ -58,7 +58,16 @@ export async function handler(event) {
       await audit(event, "GALLERY_COVER_CHANGED", { galleryId, photoId: input.coverPhotoId }); return json({ gallery: result.Attributes });
     }
     if (event.requestContext?.http?.method === "POST" && p.match(/^\/admin\/galleries\/[^/]+\/upload$/)) {
-      const galleryId = p.split("/")[3]; const input = body(event); const photoId = randomUUID(); const key = `originals/${galleryId}/${photoId}/${input.filename || "photo.jpg"}`;
+      const galleryId = p.split("/")[3]; const input = body(event);
+      if (input.thumbnailOf) {
+        const photo = await db.send(new GetCommand({ TableName: process.env.PHOTOS_TABLE, Key: { id: input.thumbnailOf } }));
+        if (!photo.Item || photo.Item.galleryId !== galleryId) return json({ error: "photo-not-found" }, 404);
+        const key = `thumbs/${galleryId}/${input.thumbnailOf}.jpg`;
+        const url = await getSignedUrl(s3, new PutObjectCommand({ Bucket: process.env.PHOTO_BUCKET, Key: key, ContentType: "image/jpeg" }), { expiresIn: 600 });
+        await db.send(new UpdateCommand({ TableName: process.env.PHOTOS_TABLE, Key: { id: input.thumbnailOf }, UpdateExpression: "SET thumbKey = :k", ExpressionAttributeValues: { ":k": key } }));
+        return json({ photoId: input.thumbnailOf, key, url });
+      }
+      const photoId = randomUUID(); const key = `originals/${galleryId}/${photoId}/${input.filename || "photo.jpg"}`;
       const url = await getSignedUrl(s3, new PutObjectCommand({ Bucket: process.env.PHOTO_BUCKET, Key: key, ContentType: input.contentType || "application/octet-stream" }), { expiresIn: 600 });
       await db.send(new PutCommand({ TableName: process.env.PHOTOS_TABLE, Item: { id: photoId, galleryId, key, filename: input.filename || "photo.jpg", setName: input.setName || "Highlights", size: Number(input.size) || 0, contentType: input.contentType || "application/octet-stream", sortOrder: Date.now(), createdAt: new Date().toISOString(), createdById: actor.sub } }));
       await audit(event, "PHOTO_UPLOAD_URL_CREATED", { galleryId, photoId }); return json({ photoId, key, url });
@@ -68,7 +77,7 @@ export async function handler(event) {
       if (!names.length) return json({ error: "nothing-to-update" }, 400); const values = {}; if (input.filename) values[":f"] = input.filename; if (input.setName) values[":s"] = input.setName;
       const result = await db.send(new UpdateCommand({ TableName: process.env.PHOTOS_TABLE, Key: { id: photoId }, UpdateExpression: `SET ${names.join(", ")}`, ExpressionAttributeValues: values, ReturnValues: "ALL_NEW" })); return json({ photo: result.Attributes });
     }
-    if (event.requestContext?.http?.method === "DELETE" && p.match(/^\/admin\/photos\/[^/]+$/)) { const photoId = p.split("/")[3]; await db.send(new DeleteCommand({ TableName: process.env.PHOTOS_TABLE, Key: { id: photoId } })); return json({ ok: true }); }
+    if (event.requestContext?.http?.method === "DELETE" && p.match(/^\/admin\/photos\/[^/]+$/)) { const photoId = p.split("/")[3]; const found = await db.send(new GetCommand({ TableName: process.env.PHOTOS_TABLE, Key: { id: photoId } })); if (found.Item?.key) await db.send(new DeleteObjectCommand({ Bucket: process.env.PHOTO_BUCKET, Key: found.Item.key })); if (found.Item?.thumbKey) await db.send(new DeleteObjectCommand({ Bucket: process.env.PHOTO_BUCKET, Key: found.Item.thumbKey })); await db.send(new DeleteCommand({ TableName: process.env.PHOTOS_TABLE, Key: { id: photoId } })); return json({ ok: true }); }
     return json({ error: "not-found" }, 404);
   } catch (error) { return json({ error: error.message || "server-error" }, error.statusCode || 500); }
 }
