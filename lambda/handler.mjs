@@ -57,6 +57,12 @@ export async function handler(event) {
       const result = await db.send(new UpdateCommand({ TableName: process.env.GALLERIES_TABLE, Key: { id: galleryId }, UpdateExpression: expression, ExpressionAttributeNames: names, ExpressionAttributeValues: values, ReturnValues: "ALL_NEW" }));
       await audit(event, "GALLERY_COVER_CHANGED", { galleryId, photoId: input.coverPhotoId }); return json({ gallery: result.Attributes });
     }
+    if (event.requestContext?.http?.method === "DELETE" && p.match(/^\/admin\/galleries\/[^/]+$/)) {
+      const galleryId = p.split("/")[3];
+      const photos = await db.send(new QueryCommand({ TableName: process.env.PHOTOS_TABLE, IndexName: "galleryId-sortOrder-index", KeyConditionExpression: "galleryId = :g", ExpressionAttributeValues: { ":g": galleryId } }));
+      for (const photo of photos.Items || []) { if (photo.key) await db.send(new DeleteObjectCommand({ Bucket: process.env.PHOTO_BUCKET, Key: photo.key })); if (photo.thumbKey) await db.send(new DeleteObjectCommand({ Bucket: process.env.PHOTO_BUCKET, Key: photo.thumbKey })); await db.send(new DeleteCommand({ TableName: process.env.PHOTOS_TABLE, Key: { id: photo.id } })); }
+      await db.send(new DeleteCommand({ TableName: process.env.GALLERIES_TABLE, Key: { id: galleryId } })); await audit(event, "GALLERY_DELETED", { galleryId }); return json({ ok: true });
+    }
     if (event.requestContext?.http?.method === "POST" && p.match(/^\/admin\/galleries\/[^/]+\/upload$/)) {
       const galleryId = p.split("/")[3]; const input = body(event);
       if (input.thumbnailOf) {
