@@ -65,7 +65,7 @@ export async function handler(event) {
       if (input.displayDate !== undefined) { values[":d"] = String(input.displayDate).slice(0, 10); updates.push("displayDate = :d"); }
       if (input.description !== undefined) { values[":desc"] = input.description || null; updates.push("description = :desc"); }
       if (input.sets) { values[":sets"] = input.sets; updates.push("sets = :sets"); }
-      if (input.coverPhotoId !== undefined) { values[":c"] = input.coverPhotoId; updates.push("coverPhotoId = :c"); }
+      if (input.coverPhotoId !== undefined) { const coverPhotoId = String(input.coverPhotoId).trim(); if (!coverPhotoId) return json({ error: "invalid-cover" }, 400); names["#cover"] = "coverPhotoId"; values[":c"] = coverPhotoId; updates.push("#cover = :c"); }
       if (!updates.length) return json({ error: "nothing-to-update" }, 400);
       updates.push("updatedAt = :u"); const result = await db.send(new UpdateCommand({ TableName: process.env.GALLERIES_TABLE, Key: { id: galleryId }, UpdateExpression: `SET ${updates.join(", ")}`, ExpressionAttributeNames: Object.keys(names).length ? names : undefined, ExpressionAttributeValues: values, ReturnValues: "ALL_NEW" }));
       await audit(event, input.coverPhotoId !== undefined ? "GALLERY_COVER_CHANGED" : "GALLERY_UPDATED", { galleryId, photoId: input.coverPhotoId }); return json({ gallery: result.Attributes });
