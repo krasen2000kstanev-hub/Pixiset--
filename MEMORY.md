@@ -29,10 +29,12 @@ Serverless gallery route is `/galleries/{proxy+}` so both gallery IDs and
   keyboard lightbox navigation, focus styles and mobile touch targets.
 - Improved static admin UX: logout, search/status filters and client-side upload checks.
 - Added static client selection tools: favorites filter, share/copy selection and Bulgarian lightbox actions.
+- Added stable favorite keys, per-photo download buttons and original-quality cover loading in the static gallery.
+- Added persistent `displayDate` editing with title in the static admin panel and Lambda PATCH support for multiple gallery fields.
 
 ## Verification
 
-- 15/15 Vitest tests pass.
+- 17/17 Vitest tests pass.
 - `npx tsc --noEmit` passes.
 - `node --check lambda/handler.mjs` passes.
 - Production build passes.
