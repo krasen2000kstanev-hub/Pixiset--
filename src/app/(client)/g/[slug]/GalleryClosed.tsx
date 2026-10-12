@@ -1,15 +1,15 @@
 const COPY: Record<string, { title: string; body: string }> = {
   "not-found": {
-    title: "Gallery not found",
-    body: "This link may be wrong or the gallery has been removed.",
+    title: "Галерията не е намерена",
+    body: "Линкът може да е грешен или галерията е премахната.",
   },
   draft: {
-    title: "Not available yet",
-    body: "This gallery hasn’t been published. Please check back later.",
+    title: "Галерията още не е достъпна",
+    body: "Галерията не е публикувана. Провери отново по-късно.",
   },
   expired: {
-    title: "This gallery has expired",
-    body: "Access to these photos has closed. Contact your photographer to reopen it.",
+    title: "Галерията е изтекла",
+    body: "Достъпът до снимките е затворен. Свържи се с фотографа.",
   },
 };
 

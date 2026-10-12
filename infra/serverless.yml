@@ -56,7 +56,7 @@ Resources:
           Type: HttpApi
           Properties:
             ApiId: !Ref GalleryApi
-            Path: /galleries/{id}
+            Path: /galleries/{proxy+}
             Method: GET
             Auth:
               Authorizer: NONE

@@ -12,6 +12,13 @@ const body = (event) => event.body ? JSON.parse(event.isBase64Encoded ? Buffer.f
 const claims = (event) => event.requestContext?.authorizer?.jwt?.claims || {};
 const requireTeam = (event) => { const c = claims(event); if (!c.sub) throw Object.assign(new Error("Unauthorized"), { statusCode: 401 }); return c; };
 const audit = async (event, action, data = {}) => db.send(new PutCommand({ TableName: process.env.AUDIT_TABLE, Item: { id: `${Date.now()}-${randomUUID()}`, action, actorId: claims(event).sub || null, createdAt: new Date().toISOString(), ...data } }));
+export const validateUpload = (input = {}) => {
+  const allowedTypes = new Set(["image/jpeg", "image/png", "image/webp"]);
+  const size = Number(input.size);
+  const filename = String(input.filename || "photo.jpg").split(/[\\/]/).pop().replace(/[^a-zA-Z0-9._() -]/g, "_").slice(0, 120) || "photo.jpg";
+  if (!allowedTypes.has(input.contentType) || !Number.isSafeInteger(size) || size < 1 || size > 50 * 1024 * 1024) return null;
+  return { filename, size, contentType: input.contentType };
+};
 
 export async function handler(event) {
   try {
@@ -60,7 +67,7 @@ export async function handler(event) {
     if (event.requestContext?.http?.method === "DELETE" && p.match(/^\/admin\/galleries\/[^/]+$/)) {
       const galleryId = p.split("/")[3];
       const photos = await db.send(new QueryCommand({ TableName: process.env.PHOTOS_TABLE, IndexName: "galleryId-sortOrder-index", KeyConditionExpression: "galleryId = :g", ExpressionAttributeValues: { ":g": galleryId } }));
-      for (const photo of photos.Items || []) { if (photo.key) await db.send(new DeleteObjectCommand({ Bucket: process.env.PHOTO_BUCKET, Key: photo.key })); if (photo.thumbKey) await db.send(new DeleteObjectCommand({ Bucket: process.env.PHOTO_BUCKET, Key: photo.thumbKey })); await db.send(new DeleteCommand({ TableName: process.env.PHOTOS_TABLE, Key: { id: photo.id } })); }
+      for (const photo of photos.Items || []) { if (photo.key) await s3.send(new DeleteObjectCommand({ Bucket: process.env.PHOTO_BUCKET, Key: photo.key })); if (photo.thumbKey) await s3.send(new DeleteObjectCommand({ Bucket: process.env.PHOTO_BUCKET, Key: photo.thumbKey })); await db.send(new DeleteCommand({ TableName: process.env.PHOTOS_TABLE, Key: { id: photo.id } })); }
       await db.send(new DeleteCommand({ TableName: process.env.GALLERIES_TABLE, Key: { id: galleryId } })); await audit(event, "GALLERY_DELETED", { galleryId }); return json({ ok: true });
     }
     if (event.requestContext?.http?.method === "POST" && p.match(/^\/admin\/galleries\/[^/]+\/upload$/)) {
@@ -73,9 +80,12 @@ export async function handler(event) {
         await db.send(new UpdateCommand({ TableName: process.env.PHOTOS_TABLE, Key: { id: input.thumbnailOf }, UpdateExpression: "SET thumbKey = :k", ExpressionAttributeValues: { ":k": key } }));
         return json({ photoId: input.thumbnailOf, key, url });
       }
-      const photoId = randomUUID(); const key = `originals/${galleryId}/${photoId}/${input.filename || "photo.jpg"}`;
-      const url = await getSignedUrl(s3, new PutObjectCommand({ Bucket: process.env.PHOTO_BUCKET, Key: key, ContentType: input.contentType || "application/octet-stream" }), { expiresIn: 600 });
-      await db.send(new PutCommand({ TableName: process.env.PHOTOS_TABLE, Item: { id: photoId, galleryId, key, filename: input.filename || "photo.jpg", setName: input.setName || "Highlights", size: Number(input.size) || 0, contentType: input.contentType || "application/octet-stream", sortOrder: Date.now(), createdAt: new Date().toISOString(), createdById: actor.sub } }));
+      const upload = validateUpload(input);
+      if (!upload) return json({ error: "invalid-image" }, 400);
+      const { filename, size, contentType } = upload;
+      const photoId = randomUUID(); const key = `originals/${galleryId}/${photoId}/${filename}`;
+      const url = await getSignedUrl(s3, new PutObjectCommand({ Bucket: process.env.PHOTO_BUCKET, Key: key, ContentType: input.contentType }), { expiresIn: 600 });
+      await db.send(new PutCommand({ TableName: process.env.PHOTOS_TABLE, Item: { id: photoId, galleryId, key, filename, setName: input.setName || "Highlights", size, contentType: input.contentType, sortOrder: Date.now(), createdAt: new Date().toISOString(), createdById: actor.sub } }));
       await audit(event, "PHOTO_UPLOAD_URL_CREATED", { galleryId, photoId }); return json({ photoId, key, url });
     }
     if (event.requestContext?.http?.method === "PATCH" && p.match(/^\/admin\/photos\/[^/]+$/)) {
@@ -83,7 +93,7 @@ export async function handler(event) {
       if (!names.length) return json({ error: "nothing-to-update" }, 400); const values = {}; if (input.filename) values[":f"] = input.filename; if (input.setName) values[":s"] = input.setName;
       const result = await db.send(new UpdateCommand({ TableName: process.env.PHOTOS_TABLE, Key: { id: photoId }, UpdateExpression: `SET ${names.join(", ")}`, ExpressionAttributeValues: values, ReturnValues: "ALL_NEW" })); return json({ photo: result.Attributes });
     }
-    if (event.requestContext?.http?.method === "DELETE" && p.match(/^\/admin\/photos\/[^/]+$/)) { const photoId = p.split("/")[3]; const found = await db.send(new GetCommand({ TableName: process.env.PHOTOS_TABLE, Key: { id: photoId } })); if (found.Item?.key) await db.send(new DeleteObjectCommand({ Bucket: process.env.PHOTO_BUCKET, Key: found.Item.key })); if (found.Item?.thumbKey) await db.send(new DeleteObjectCommand({ Bucket: process.env.PHOTO_BUCKET, Key: found.Item.thumbKey })); await db.send(new DeleteCommand({ TableName: process.env.PHOTOS_TABLE, Key: { id: photoId } })); return json({ ok: true }); }
+    if (event.requestContext?.http?.method === "DELETE" && p.match(/^\/admin\/photos\/[^/]+$/)) { const photoId = p.split("/")[3]; const found = await db.send(new GetCommand({ TableName: process.env.PHOTOS_TABLE, Key: { id: photoId } })); if (found.Item?.key) await s3.send(new DeleteObjectCommand({ Bucket: process.env.PHOTO_BUCKET, Key: found.Item.key })); if (found.Item?.thumbKey) await s3.send(new DeleteObjectCommand({ Bucket: process.env.PHOTO_BUCKET, Key: found.Item.thumbKey })); await db.send(new DeleteCommand({ TableName: process.env.PHOTOS_TABLE, Key: { id: photoId } })); return json({ ok: true }); }
     return json({ error: "not-found" }, 404);
   } catch (error) { return json({ error: error.message || "server-error" }, error.statusCode || 500); }
 }

@@ -35,8 +35,8 @@ export default function SelectionModal({
     const { error } = await res.json().catch(() => ({ error: "" }));
     setError(
       error === "no-favorites"
-        ? "Add some favorites first."
-        : "Could not send. Please try again.",
+        ? "Добави любими снимки първо."
+        : "Селекцията не може да се изпрати. Опитай отново.",
     );
   }
 
@@ -51,27 +51,26 @@ export default function SelectionModal({
       >
         {done ? (
           <div className="space-y-3 text-center">
-            <h2 className="font-serif text-xl">Selection sent</h2>
+            <h2 className="font-serif text-xl">Селекцията е изпратена</h2>
             <p className="text-sm text-neutral-500">
-              Your photographer has received your {count} favorite
-              {count === 1 ? "" : "s"}.
+              Фотографът получи твоите {count} избрани снимки.
             </p>
             <button
               onClick={onClose}
               className="rounded-full bg-ink px-4 py-2 text-sm text-white"
             >
-              Close
+              Затвори
             </button>
           </div>
         ) : (
           <form onSubmit={submit} className="space-y-3">
-            <h2 className="font-serif text-xl">Send your selection</h2>
+            <h2 className="font-serif text-xl">Изпрати селекцията</h2>
             <p className="text-sm text-neutral-500">
-              {count} photo{count === 1 ? "" : "s"} selected.
+              Избрани снимки: {count}.
             </p>
             <input
               required
-              placeholder="Your name"
+              placeholder="Твоето име"
               value={name}
               onChange={(e) => setName(e.target.value)}
               className="w-full rounded border border-neutral-300 px-3 py-2 text-sm"
@@ -79,13 +78,13 @@ export default function SelectionModal({
             <input
               required
               type="email"
-              placeholder="Your email"
+              placeholder="Твоят имейл"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               className="w-full rounded border border-neutral-300 px-3 py-2 text-sm"
             />
             <textarea
-              placeholder="Note (optional)"
+              placeholder="Бележка (по желание)"
               value={note}
               onChange={(e) => setNote(e.target.value)}
               rows={3}
@@ -98,13 +97,13 @@ export default function SelectionModal({
                 onClick={onClose}
                 className="rounded-full px-4 py-2 text-sm text-neutral-500"
               >
-                Cancel
+                Отказ
               </button>
               <button
                 disabled={busy}
                 className="rounded-full bg-ink px-4 py-2 text-sm text-white disabled:opacity-50"
               >
-                {busy ? "Sending…" : "Send"}
+                {busy ? "Изпращане…" : "Изпрати"}
               </button>
             </div>
           </form>

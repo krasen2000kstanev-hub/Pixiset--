@@ -8,6 +8,50 @@ Client Gallery. Фотографът качва галерии, споделя �
 > Това е самостоятелен продукт с еквивалентна функционалност — не съдържа код,
 > дизайн или ресурси на Pixieset.
 
+## Текущо състояние
+
+Репото съдържа две реализации:
+
+- `docs/` + `lambda/` — текущата лека AWS версия със статичен frontend, API Gateway,
+  Cognito, Lambda, DynamoDB и S3.
+- `src/` + `prisma/` — пълната Next.js версия с PostgreSQL, Prisma, Auth.js,
+  CloudFront и SES.
+
+AWS версията поддържа създаване, публикуване и изтриване на галерии, качване и
+изтриване на снимки, корица, сетове, slug линкове, преглед и сваляне. Slug маршрутът
+се обслужва от `/galleries/{proxy+}`.
+
+Админ панелът вече има logout, търсене и филтър по статус, локална проверка на
+upload файловете и видим прогрес за всяко качване.
+
+Статичната клиентска галерия има локални любими, филтър „Само любими“, споделяне
+на селекцията чрез Web Share/clipboard и български действия в lightbox-а.
+
+Последната проверка е успешна: 15 теста, TypeScript, Lambda syntax и production
+build минават. Production dependency audit е без уязвимости.
+
+Клиентският интерфейс вече има loading/empty състояния, български labels,
+контрастен cover overlay, 44px touch targets, keyboard lightbox navigation,
+focus styling и ясни съобщения за грешен, draft или изтекъл линк.
+
+## Roadmap за подобрения
+
+Приоритетът е подреден по риск и ефект:
+
+1. Избери една основна реализация. Двете версии вече имат различен обхват и
+   ще продължат да се разминават.
+2. ✅ Добавена е server-side upload validation: MIME тип, размер, filename и S3 key.
+3. ✅ API данните в `docs/` вече се escape-ват преди HTML рендериране.
+4. Добави в AWS версията password/email gate, expiry, favorites и selection submit.
+5. Замени DynamoDB `Scan` със secondary indexes и `Query` за slug/download.
+6. Добави retry, cancel и preview за качване.
+7. Завърши keyboard/focus accessibility и mobile QA на lightbox-а.
+8. Добави handler тестове за auth, upload validation, delete cleanup и public access.
+9. Изнеси API/Cognito конфигурацията от статичния код и добави rate limiting и alarms.
+
+Първите три задачи са security/architecture работа. Дизайн и допълнителни функции
+идват след избора на една основна реализация.
+
 ## Какво има вътре
 
 | | |
@@ -24,7 +68,7 @@ Client Gallery. Фотографът качва галерии, споделя �
 
 ## Технологии
 
-Next.js 15 · TypeScript · Tailwind · Prisma · PostgreSQL · Auth.js ·
+Next.js 15.5 · TypeScript · Tailwind · Prisma · PostgreSQL · Auth.js ·
 AWS S3 + CloudFront · AWS SES.
 
 Хостинг по подразбиране: **един AWS Lightsail instance** с Docker Compose
@@ -95,6 +139,10 @@ npm test
 4. **SES** (по избор) → `infra/ses-setup.md`. Без него имейлите са изключени.
 5. **Lightsail** instance за приложението → `infra/lightsail-setup.md`.
 
+За serverless AWS варианта използвай `infra/serverless.yml`. Той създава API
+Gateway, Lambda, Cognito, DynamoDB и private S3 bucket. Lambda използва S3 клиента
+за изтриване на оригинали и thumbnails.
+
 ---
 
 ## Как работи качването (без сървърна обработка на изображения)
@@ -164,6 +212,12 @@ gh repo create <repo> --private --source=. --remote=origin --push
 `.env` е в `.gitignore` и няма да се качи — дръж секретите извън repo-то.
 След първото `npm install` комитни и `package-lock.json` (нужен за CI).
 CI (`.github/workflows/ci.yml`) прави typecheck + тестове + build при всеки push.
+
+## Известни ограничения
+
+Serverless AWS версията все още няма пароли за галерии, клиентски любими,
+селекции, email известия и автоматично изтичане. Тези функции са налични в
+Next.js версията.
 
 ## Phase 2 (не е включено)
 

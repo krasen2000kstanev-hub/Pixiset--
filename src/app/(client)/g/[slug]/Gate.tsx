@@ -52,8 +52,8 @@ export default function Gate({
       <h1 className="font-serif text-2xl">{title}</h1>
       <p className="text-center text-sm text-neutral-500">
         {needsPassword
-          ? "This gallery is private. Enter the password to continue."
-          : "Please enter your email to view this gallery."}
+          ? "Тази галерия е частна. Въведи паролата, за да продължиш."
+          : "Въведи своя имейл, за да видиш галерията."}
       </p>
       <form onSubmit={submit} className="w-full space-y-3">
         {needsPassword && (
@@ -61,7 +61,7 @@ export default function Gate({
             type="password"
             autoFocus
             required
-            placeholder="Password"
+            placeholder="Парола"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             className="w-full rounded border border-neutral-300 px-3 py-2 text-sm"
@@ -82,7 +82,7 @@ export default function Gate({
           disabled={busy}
           className="w-full rounded-full bg-ink px-4 py-2 text-sm text-white disabled:opacity-50"
         >
-          {busy ? "Checking…" : "View gallery"}
+          {busy ? "Проверка…" : "Отвори галерията"}
         </button>
       </form>
     </main>

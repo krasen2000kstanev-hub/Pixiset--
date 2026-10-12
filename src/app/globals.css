@@ -17,6 +17,19 @@ body {
   color: #1a1a1a;
 }
 
+button,
+input,
+textarea {
+  min-height: 44px;
+}
+
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid #b9815e;
+  outline-offset: 2px;
+}
+
 /* Justified gallery grid: rows of images with consistent height, filled width. */
 .justified-row {
   display: flex;
@@ -28,5 +41,14 @@ body {
   .justified-row {
     gap: 4px;
     margin-bottom: 4px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
   }
 }

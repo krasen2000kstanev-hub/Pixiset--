@@ -98,7 +98,7 @@ export default function GalleryView(props: Props) {
   }
 
   async function onDownloadAll() {
-    if (!confirm(`Download all ${photos.length} photos?`)) return;
+    if (!confirm(`Свали всички ${photos.length} снимки?`)) return;
     setBulkBusy(true);
     try {
       const res = await fetch(`/api/g/${slug}/download`, {
@@ -131,14 +131,14 @@ export default function GalleryView(props: Props) {
               onClick={() => setShowFavoritesOnly(false)}
               className={!showFavoritesOnly ? "font-medium" : "text-neutral-500"}
             >
-              All {photos.length}
+              Всички {photos.length}
             </button>
             <span className="text-neutral-300">·</span>
             <button
               onClick={() => setShowFavoritesOnly(true)}
               className={showFavoritesOnly ? "font-medium" : "text-neutral-500"}
             >
-              Favorites {favCount}
+              Любими {favCount}
             </button>
           </div>
           <div className="flex items-center gap-2">
@@ -148,7 +148,7 @@ export default function GalleryView(props: Props) {
                 className="rounded-full px-3 py-1.5 text-white"
                 style={{ background: "var(--accent)" }}
               >
-                Send selection
+                Изпрати селекция
               </button>
             )}
             {downloadEnabled && (
@@ -157,7 +157,7 @@ export default function GalleryView(props: Props) {
                 disabled={bulkBusy}
                 className="rounded-full border border-neutral-300 px-3 py-1.5 disabled:opacity-50"
               >
-                {bulkBusy ? "Preparing…" : "Download all"}
+                {bulkBusy ? "Подготвяне…" : "Свали всички"}
               </button>
             )}
           </div>
@@ -166,9 +166,13 @@ export default function GalleryView(props: Props) {
 
       {/* Grid */}
       <div ref={gridRef} className="mx-auto max-w-6xl px-4 py-6">
-        {visible.length === 0 ? (
+        {width === 0 ? (
+          <p className="py-16 text-center text-sm text-neutral-500" role="status">
+            Зареждане на галерията…
+          </p>
+        ) : visible.length === 0 ? (
           <p className="py-16 text-center text-sm text-neutral-500">
-            No favorites yet. Tap the heart on a photo to add it.
+            Няма избрани снимки. Натисни сърцето върху снимка, за да я добавиш.
           </p>
         ) : (
           rows.map((row, ri) => (
@@ -255,6 +259,7 @@ function Cover({
           className="absolute inset-0 h-full w-full object-cover opacity-70"
         />
       )}
+      <div className="absolute inset-0 bg-black/35" aria-hidden="true" />
       <div
         className={`relative mx-auto flex w-full max-w-6xl flex-col gap-3 px-6 text-white ${align}`}
       >

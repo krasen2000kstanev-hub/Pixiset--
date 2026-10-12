@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import type { ClientPhoto } from "./GalleryView";
 
 export default function Lightbox({
@@ -23,6 +23,7 @@ export default function Lightbox({
   onDownload: (photoId: string) => void;
 }) {
   const photo = photos[index];
+  const closeRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -30,6 +31,10 @@ export default function Lightbox({
       if (e.key === "ArrowRight" && index < photos.length - 1) onNav(index + 1);
       if (e.key === "ArrowLeft" && index > 0) onNav(index - 1);
       if (e.key.toLowerCase() === "f") onToggleFavorite(photo.id);
+      if (e.key === "Tab") {
+        e.preventDefault();
+        closeRef.current?.focus();
+      }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -41,6 +46,9 @@ export default function Lightbox({
   return (
     <div
       className="fixed inset-0 z-50 flex flex-col bg-black/95"
+      role="dialog"
+      aria-modal="true"
+      aria-label={`Снимка ${index + 1} от ${photos.length}`}
       onClick={onClose}
     >
       <div
@@ -53,15 +61,15 @@ export default function Lightbox({
         <div className="flex items-center gap-4">
           <button
             onClick={() => onToggleFavorite(photo.id)}
-            className="text-lg"
-            aria-label="Favorite"
+            className="min-h-11 min-w-11 text-lg"
+            aria-label={isFav ? "Премахни от любими" : "Добави в любими"}
           >
             {isFav ? "♥" : "♡"}
           </button>
           {downloadEnabled && (
-            <button onClick={() => onDownload(photo.id)}>Download</button>
+            <button onClick={() => onDownload(photo.id)} className="min-h-11 px-2">Свали</button>
           )}
-          <button onClick={onClose} aria-label="Close" className="text-lg">
+          <button ref={closeRef} onClick={onClose} aria-label="Затвори" className="min-h-11 min-w-11 text-lg">
             ✕
           </button>
         </div>
@@ -75,7 +83,7 @@ export default function Lightbox({
           <button
             onClick={() => onNav(index - 1)}
             className="absolute left-2 top-1/2 -translate-y-1/2 rounded-full bg-white/10 px-3 py-2 text-white"
-            aria-label="Previous"
+            aria-label="Предишна снимка"
           >
             ‹
           </button>
@@ -90,7 +98,7 @@ export default function Lightbox({
           <button
             onClick={() => onNav(index + 1)}
             className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full bg-white/10 px-3 py-2 text-white"
-            aria-label="Next"
+            aria-label="Следваща снимка"
           >
             ›
           </button>
