@@ -31,6 +31,7 @@ Serverless gallery route is `/galleries/{proxy+}` so both gallery IDs and
 - Added static client selection tools: favorites filter, share/copy selection and Bulgarian lightbox actions.
 - Added stable favorite keys, per-photo download buttons and original-quality cover loading in the static gallery.
 - Added persistent `displayDate` editing with title in the static admin panel and Lambda PATCH support for multiple gallery fields.
+- Fixed static gallery script name collisions and URL decoding so lightbox, selection controls and downloads execute correctly.
 
 ## Verification
 
