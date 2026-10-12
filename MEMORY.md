@@ -32,6 +32,8 @@ Serverless gallery route is `/galleries/{proxy+}` so both gallery IDs and
 - Added stable favorite keys, per-photo download buttons and original-quality cover loading in the static gallery.
 - Added persistent `displayDate` editing with title in the static admin panel and Lambda PATCH support for multiple gallery fields.
 - Fixed static gallery script name collisions and URL decoding so lightbox, selection controls and downloads execute correctly.
+- Added a single release workflow: the same `GITHUB_SHA` is deployed to Lambda as `APP_VERSION` and stamped into Pages `docs/version.json`; the client warns if they differ.
+- Added sequential download controls for selected/all client photos and a public `/version` endpoint.
 
 ## Verification
 
@@ -45,14 +47,14 @@ Serverless gallery route is `/galleries/{proxy+}` so both gallery IDs and
 
 Serverless version does not yet implement gallery passwords, favorites,
 selection submission, email notifications or expiry dates. Those exist in the
-Next.js version. Serverless deployment is not confirmed from this workspace.
+Next.js version. Serverless deployment is not confirmed from this workspace; GitHub Actions needs the `AWS_ROLE_ARN` secret.
 
 ## Recommended next work
 
-1. Choose one source of truth: AWS serverless or Next.js.
+1. Add server-side ZIP for “download all” and upload retry/cancel/preview.
 2. Validate uploads server-side: MIME, size, filename and S3 key.
 3. Remove API-data `innerHTML` from `docs/`; use DOM APIs or escaping.
 4. Add AWS gallery gates, favorites and selection submission.
 5. Replace DynamoDB scans with indexes and queries.
-6. Add upload retry/cancel/preview, accessibility QA and Lambda handler tests.
+6. Add accessibility QA and Lambda handler tests.
 7. Move API/Cognito values to deployment config; add rate limiting and alarms.

@@ -2,6 +2,11 @@ AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
 Description: Low-cost serverless foundation for Client Gallery
 
+Parameters:
+  AppVersion:
+    Type: String
+    Default: dev
+
 Globals:
   Function:
     Runtime: nodejs22.x
@@ -13,6 +18,7 @@ Globals:
         PHOTOS_TABLE: !Ref PhotosTable
         AUDIT_TABLE: !Ref AuditTable
         PHOTO_BUCKET: !Ref PhotoBucket
+        APP_VERSION: !Ref AppVersion
 
 Resources:
   GalleryApi:
@@ -65,6 +71,14 @@ Resources:
           Properties:
             ApiId: !Ref GalleryApi
             Path: /download
+            Method: GET
+            Auth:
+              Authorizer: NONE
+        PublicVersion:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref GalleryApi
+            Path: /version
             Method: GET
             Auth:
               Authorizer: NONE

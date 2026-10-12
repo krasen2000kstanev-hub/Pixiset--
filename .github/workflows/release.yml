@@ -1,0 +1,67 @@
+name: Release frontend and Lambda
+
+on:
+  push:
+    branches: [client-gallery]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+  pages: write
+
+concurrency:
+  group: pixiset-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check release configuration
+        env:
+          AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
+        run: |
+          if [ -z "$AWS_ROLE_ARN" ]; then
+            echo "Missing AWS_ROLE_ARN repository secret; Lambda and frontend must be released together." >&2
+            exit 1
+          fi
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+
+      - uses: aws-actions/setup-sam@v2
+
+      - name: Build and deploy Lambda
+        env:
+          AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+          SAM_STACK_NAME: ${{ vars.SAM_STACK_NAME || 'pixiset-gallery' }}
+        run: |
+          sam build --template-file infra/serverless.yml --build-dir .aws-sam/build
+          sam deploy --template-file .aws-sam/build/template.yaml \
+            --stack-name "$SAM_STACK_NAME" \
+            --region "$AWS_REGION" \
+            --capabilities CAPABILITY_IAM \
+            --resolve-s3 \
+            --parameter-overrides AppVersion="$GITHUB_SHA" \
+            --no-confirm-changeset \
+            --no-fail-on-empty-changeset
+
+      - uses: actions/configure-pages@v5
+
+      - name: Stamp frontend with the same commit
+        run: printf '{"version":"%s"}\n' "$GITHUB_SHA" > docs/version.json
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./docs
+
+      - id: deployment
+        uses: actions/deploy-pages@v4

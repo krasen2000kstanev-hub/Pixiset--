@@ -30,6 +30,12 @@ upload файловете и видим прогрес за всяко качв�
 зарежда оригиналната снимка с висок приоритет. Админ панелът пази заглавието и
 ръчната дата заедно.
 
+Публикуването на AWS версията е атомарно: `.github/workflows/release.yml` използва
+един и същ Git commit за Lambda (`APP_VERSION`) и GitHub Pages (`docs/version.json`).
+При разминаване клиентът показва предупреждение за презареждане. За release са нужни
+repository secret `AWS_ROLE_ARN` (OIDC role) и по избор variables `AWS_REGION` и
+`SAM_STACK_NAME`.
+
 Последната проверка е успешна: 17 теста, TypeScript, Lambda syntax и production
 build минават. Production dependency audit е без уязвимости.
 
@@ -41,13 +47,12 @@ focus styling и ясни съобщения за грешен, draft или и�
 
 Приоритетът е подреден по риск и ефект:
 
-1. Избери една основна реализация. Двете версии вече имат различен обхват и
-   ще продължат да се разминават.
+1. ✅ AWS frontend и Lambda се публикуват от един release workflow и commit.
 2. ✅ Добавена е server-side upload validation: MIME тип, размер, filename и S3 key.
 3. ✅ API данните в `docs/` вече се escape-ват преди HTML рендериране.
 4. Добави в AWS версията password/email gate, expiry, favorites и selection submit.
 5. Замени DynamoDB `Scan` със secondary indexes и `Query` за slug/download.
-6. Добави retry, cancel и preview за качване.
+6. Добави server-side ZIP за „Свали всички“ и retry/cancel/preview за качване.
 7. Завърши keyboard/focus accessibility и mobile QA на lightbox-а.
 8. Добави handler тестове за auth, upload validation, delete cleanup и public access.
 9. Изнеси API/Cognito конфигурацията от статичния код и добави rate limiting и alarms.
