@@ -1,6 +1,6 @@
 import { config } from "./config.js";
 import { h, ask, toast, fmtBytes, fmtDate, session } from "./common.js";
-import { checkFiles, uploadPhotos } from "./upload.js";
+import { checkFiles, uploadPhotos, upgradePhotos } from "./upload.js";
 
 const root = document.querySelector("#root");
 
@@ -378,7 +378,37 @@ async function detailScreen(id) {
       return tile;
     }
 
-    body.replaceChildren(h("div", { class: "panel" },
+    // Photos from the first app version have no optimized sizes: previews would load the original.
+    const legacy = photos.filter((p) => p.needsRenditions);
+    const upgradeStatus = h("div", { "aria-live": "polite" });
+    async function runUpgrade() {
+      if (activeUpload) return toast("Качването вече върви.");
+      const controller = new AbortController();
+      activeUpload = controller;
+      const bar = h("i");
+      upgradeStatus.replaceChildren(
+        h("div", { class: "row" }, h("span", { class: "grow" }, "Подготвяне…"), h("button", { class: "btn btn-small", onclick: () => controller.abort() }, "Откажи")),
+        h("div", { class: "progress" }, bar));
+      let items;
+      try {
+        items = await upgradePhotos({
+          photos: legacy, api, signal: controller.signal,
+          onUpdate: (all) => { bar.style.width = `${Math.round((all.filter((i) => i.status === "done").length / all.length) * 100)}%`; },
+        });
+      } finally {
+        activeUpload = null;
+      }
+      const failed = items.filter((i) => i.status === "error" || i.status === "cancelled");
+      toast(failed.length ? `Подготвени ${items.length - failed.length} от ${items.length}. ${failed.length} не успяха${failed[0].error ? `: ${failed[0].error}` : "."}` : `Подготвени ${items.length} снимки`, failed.length ? "error" : "success");
+      if (alive) await reload();
+    }
+    const upgradePanel = legacy.length ? h("div", { class: "panel" },
+      h("h2", {}, "Стари снимки"),
+      h("p", { class: "muted", style: "margin:0 0 16px" }, `${legacy.length} снимки са качени с предишната версия и нямат оптимизирани размери. Докато не ги подготвиш, прегледите зареждат оригиналите — бавно и без да се уважава забраната за сваляне.`),
+      h("button", { class: "btn btn-primary", onclick: runUpgrade }, `Подготви ${legacy.length} снимки`),
+      upgradeStatus) : null;
+
+    body.replaceChildren(upgradePanel, h("div", { class: "panel" },
       h("div", { class: "row", style: "margin-bottom:12px" }, h("span", { class: "muted" }, "Качи в сет:"), uploadSet, input),
       drop, status),
       h("div", { class: "row", style: "margin-bottom:8px" }, filter, h("span", { class: "muted" }, `${photos.length} снимки · ${fmtBytes(photos.reduce((n, p) => n + (p.size || 0), 0))}`)),

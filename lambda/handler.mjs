@@ -44,6 +44,7 @@ const json = (data, statusCode = 200) => ({
 });
 
 const trim = (value, max) => String(value ?? "").trim().slice(0, max);
+const dim = (v) => (Number.isSafeInteger(Number(v)) && Number(v) > 0 && Number(v) < 100000 ? Number(v) : undefined);
 
 // ---------- pure helpers (exported for tests) ----------
 
@@ -328,8 +329,11 @@ async function viewGallery(event, parts) {
       width: p.width || null,
       height: p.height || null,
       size: p.size || 0,
+      // Never hand out the original while a smaller rendition exists. Photos from the first app
+      // version have no `displayKey`; their 900px thumbnail is the best safe preview until the
+      // admin runs "prepare photos". The original is the last resort only for photos with neither.
       url: await sign(p.thumbKey || p.displayKey || p.key),
-      displayUrl: await sign(p.displayKey || p.key),
+      displayUrl: await sign(p.displayKey || p.thumbKey || p.key),
     }))),
     nextCursor: page.next,
   });
@@ -547,6 +551,7 @@ async function admin(event, method, path) {
       return json({
         photos: await Promise.all(photos.map(async (p) => ({
           id: p.id, filename: p.filename, setName: p.setName || "Highlights", size: p.size || 0, width: p.width || null, height: p.height || null,
+          needsRenditions: !p.displayKey || !p.thumbKey || !p.width,
           url: await sign(p.thumbKey || p.displayKey || p.key, {}, 900),
         }))),
       });
@@ -592,7 +597,6 @@ async function admin(event, method, path) {
       if (!original) throw new HttpError(400, "upload-missing");
       const size = Number(original.ContentLength) || upload.size;
       if (size > MAX_UPLOAD) throw new HttpError(400, "invalid-image");
-      const dim = (v) => (Number.isSafeInteger(Number(v)) && Number(v) > 0 && Number(v) < 100000 ? Number(v) : undefined);
       const sets = gallery.sets?.length ? gallery.sets : ["Highlights"];
       const item = {
         id: photoId, galleryId: id, key: keys.key, filename: upload.filename, setName: sets.includes(input.setName) ? input.setName : sets[0], size, contentType: upload.contentType,
@@ -618,10 +622,33 @@ async function admin(event, method, path) {
       return json({ events: events.map(({ ttl, ...e }) => e) });
     }
 
+    // Photos uploaded by the first app version have no display size (and sometimes no thumbnail).
+    // The browser fetches the original, makes both renditions and PUTs them here; then PATCHes `renditions: true`.
+    case "POST photos/:id/renditions": {
+      const photo = await getItem(T.photos(), id);
+      if (!photo) throw new HttpError(404, "not-found");
+      const keys = { display: `display/${photo.galleryId}/${id}.jpg`, thumb: `thumbs/${photo.galleryId}/${id}.jpg` };
+      const [original, display, thumb] = await Promise.all([sign(photo.key, {}, 900), signPut(keys.display, "image/jpeg"), signPut(keys.thumb, "image/jpeg")]);
+      return json({ filename: photo.filename, original, urls: { display, thumb } });
+    }
+
     case "PATCH photos/:id": {
       const names = {};
       const values = {};
       const sets = [];
+      if (input.renditions === true) {
+        const photo = await getItem(T.photos(), id);
+        if (!photo) throw new HttpError(404, "not-found");
+        const displayKey = `display/${photo.galleryId}/${id}.jpg`;
+        const thumbKey = `thumbs/${photo.galleryId}/${id}.jpg`;
+        const head = async (Key) => s3.send(new HeadObjectCommand({ Bucket: process.env.PHOTO_BUCKET, Key })).catch(() => null);
+        const [display, thumb] = await Promise.all([head(displayKey), head(thumbKey)]);
+        if (!display || !thumb) throw new HttpError(400, "upload-missing");
+        names["#dk"] = "displayKey"; values[":dk"] = displayKey; sets.push("#dk = :dk");
+        names["#tk"] = "thumbKey"; values[":tk"] = thumbKey; sets.push("#tk = :tk");
+        if (dim(input.width)) { names["#w"] = "width"; values[":w"] = dim(input.width); sets.push("#w = :w"); }
+        if (dim(input.height)) { names["#h"] = "height"; values[":h"] = dim(input.height); sets.push("#h = :h"); }
+      }
       if (input.filename !== undefined) {
         const filename = validateUpload({ filename: input.filename, contentType: "image/jpeg", size: 1 })?.filename;
         if (!filename) throw new HttpError(400, "invalid-filename");

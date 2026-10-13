@@ -96,3 +96,40 @@ export async function uploadPhotos({ files, galleryId, setName, api, signal, onU
   onUpdate(items);
   return items;
 }
+
+/**
+ * Prepare photos from the first app version (no display size, sometimes no thumbnail): fetch each
+ * original, make thumb + display in the browser, PUT both and let the API record them. This also
+ * fills width/height. Returns the items like uploadPhotos(); failed ones carry `error`.
+ */
+export async function upgradePhotos({ photos, api, signal, onUpdate, concurrency = 2 }) {
+  const items = photos.map((photo, index) => ({ photo, index, status: "wait", error: null }));
+  let cursor = 0;
+
+  async function worker() {
+    while (cursor < items.length && !signal?.aborted) {
+      const item = items[cursor++];
+      item.status = "work";
+      onUpdate(items);
+      try {
+        const job = await api(`/admin/photos/${item.photo.id}/renditions`, { method: "POST", body: {} });
+        const res = await fetch(job.original, { signal });
+        if (!res.ok) throw new Error(`Оригиналът не се чете (${res.status})`);
+        const blob = await res.blob();
+        const r = await makeRenditions(new File([blob], item.photo.filename, { type: blob.type || "image/jpeg" }));
+        await Promise.all([put(job.urls.display, r.display, "image/jpeg", signal), put(job.urls.thumb, r.thumb, "image/jpeg", signal)]);
+        await api(`/admin/photos/${item.photo.id}`, { method: "PATCH", body: { renditions: true, width: r.width, height: r.height } });
+        item.status = "done";
+      } catch (error) {
+        item.status = signal?.aborted ? "cancelled" : "error";
+        item.error = error.message || "Грешка";
+      }
+      onUpdate(items);
+    }
+  }
+
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, worker));
+  for (const item of items) if (item.status === "wait") item.status = "cancelled";
+  onUpdate(items);
+  return items;
+}

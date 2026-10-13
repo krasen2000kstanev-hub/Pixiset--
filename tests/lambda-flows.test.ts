@@ -365,3 +365,55 @@ describe("team gallery management", () => {
     expect(res.data.events[0]).not.toHaveProperty("ttl");
   });
 });
+
+describe("photos from the first app version", () => {
+  const legacy = (n, over = {}) => seedPhoto(n, { displayKey: undefined, width: undefined, height: undefined, ...over });
+
+  it("never serves the original when a thumbnail exists", async () => {
+    seedGallery();
+    legacy(1); // has thumbKey, no displayKey
+    const { data } = await call(ev("GET", "/galleries/g1"));
+    expect(JSON.stringify(data)).not.toContain("originals/");
+    expect(data.photos[0].displayUrl).toContain("thumbs/g1/p1.jpg");
+  });
+
+  it("falls back to the original only for photos with no rendition at all", async () => {
+    seedGallery();
+    legacy(1, { thumbKey: undefined });
+    const { data } = await call(ev("GET", "/galleries/g1"));
+    expect(data.photos[0].url).toContain("originals/g1/p1/IMG_1.jpg");
+  });
+
+  it("flags them for the admin and prepares renditions end to end", async () => {
+    seedGallery();
+    legacy(1, { thumbKey: undefined });
+    seedPhoto(2); // already optimized
+    const list = async () => (await call(ev("GET", "/admin/galleries/g1/photos", { team: true }))).data.photos;
+    expect((await list()).map((p) => [p.id, p.needsRenditions])).toEqual([["p1", true], ["p2", false]]);
+
+    const job = await call(ev("POST", "/admin/photos/p1/renditions", { team: true, body: {} }));
+    expect(job.status).toBe(200);
+    expect(job.data.original).toContain("originals/g1/p1/IMG_1.jpg");
+    expect(job.data.urls.display).toContain("display/g1/p1.jpg");
+    expect(job.data.urls.thumb).toContain("thumbs/g1/p1.jpg");
+
+    const confirm = (body) => call(ev("PATCH", "/admin/photos/p1", { team: true, body }));
+    expect((await confirm({ renditions: true, width: 4000, height: 3000 })).status).toBe(400); // nothing uploaded yet
+
+    aws.objects.set("display/g1/p1.jpg", 500);
+    aws.objects.set("thumbs/g1/p1.jpg", 50);
+    expect((await confirm({ renditions: true, width: 4000, height: 3000 })).status).toBe(200);
+    expect(aws.tables.photos.get("p1")).toMatchObject({ displayKey: "display/g1/p1.jpg", thumbKey: "thumbs/g1/p1.jpg", width: 4000, height: 3000 });
+    expect((await list()).every((p) => p.needsRenditions === false)).toBe(true);
+
+    const pub = await call(ev("GET", "/galleries/g1"));
+    expect(JSON.stringify(pub.data)).not.toContain("originals/");
+    expect(pub.data.photos[0].displayUrl).toContain("display/g1/p1.jpg");
+  });
+
+  it("requires a team session and an existing photo", async () => {
+    seedGallery();
+    expect((await call(ev("POST", "/admin/photos/p1/renditions", { body: {} }))).status).toBe(401);
+    expect((await call(ev("POST", "/admin/photos/nope/renditions", { team: true, body: {} }))).status).toBe(404);
+  });
+});

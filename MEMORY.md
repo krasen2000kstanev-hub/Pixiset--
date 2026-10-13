@@ -87,6 +87,11 @@ The role's trust policy must match that string exactly (CloudTrail
 2. No email notifications (would need an SES IAM policy, which the deploy role cannot add).
 3. Reordering is limited to the photos currently shown in the admin grid ("show more" first
    to move a photo beyond the first 60).
-4. Old galleries' photos without `displayKey` fall back to the original in the lightbox.
+4. Photos from the first app version have no `displayKey` (and some no `thumbKey`). The public
+   API uses `displayKey || thumbKey || key`, so the original is served only when a photo has
+   no rendition at all. The admin gallery shows a "Стари снимки" panel; its button
+   (`upgradePhotos` in `docs/upload.js`) fetches each original, makes thumb + display in the
+   browser, PUTs them via `POST /admin/photos/{id}/renditions` and confirms with
+   `PATCH /admin/photos/{id} {renditions:true,width,height}`. Run it once per old gallery.
 5. One API response per gallery page contains presigned URLs for 800 photos; galleries
    above ~20 000 photos would need server-side filtering by set.
