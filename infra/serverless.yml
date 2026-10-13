@@ -6,20 +6,12 @@ Parameters:
   AppVersion:
     Type: String
     Default: dev
-  # Origin of the static pages (GitHub Pages). Used for API CORS and S3 CORS.
-  AllowedOrigin:
-    Type: String
-    Default: https://krasen2000kstanev-hub.github.io
-  # Exact admin page URL registered as the Cognito OAuth callback/logout URL.
-  AdminUrl:
-    Type: String
-    Default: https://krasen2000kstanev-hub.github.io/Pixiset--/admin.html
 
 Globals:
   Function:
     Runtime: nodejs22.x
-    Timeout: 29 # HTTP API hard limit is 30s; gallery deletes can touch many objects
-    MemorySize: 256 # scrypt (gallery passwords) is CPU-bound
+    Timeout: 15
+    MemorySize: 128
     Environment:
       Variables:
         GALLERIES_TABLE: !Ref GalleriesTable
@@ -27,7 +19,6 @@ Globals:
         AUDIT_TABLE: !Ref AuditTable
         PHOTO_BUCKET: !Ref PhotoBucket
         APP_VERSION: !Ref AppVersion
-        ALLOWED_ORIGIN: !Ref AllowedOrigin
 
 Resources:
   GalleryApi:
@@ -43,10 +34,9 @@ Resources:
                 - !Ref TeamClient
             IdentitySource: '$request.header.Authorization'
       CorsConfiguration:
-        AllowOrigins: [!Ref AllowedOrigin]
-        AllowHeaders: ['content-type', 'authorization', 'x-gallery-password']
+        AllowOrigins: ['*']
+        AllowHeaders: ['content-type', 'authorization']
         AllowMethods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS']
-        MaxAge: 600
 
   ApiFunction:
     Type: AWS::Serverless::Function
@@ -76,14 +66,6 @@ Resources:
             Method: GET
             Auth:
               Authorizer: NONE
-        PublicSelection:
-          Type: HttpApi
-          Properties:
-            ApiId: !Ref GalleryApi
-            Path: /galleries/{proxy+}
-            Method: POST
-            Auth:
-              Authorizer: NONE
         PublicDownload:
           Type: HttpApi
           Properties:
@@ -111,48 +93,28 @@ Resources:
     Properties:
       UsernameAttributes: [email]
       AutoVerifiedAttributes: []
-      # Team accounts are created by an admin only; nobody can self-register.
-      AdminCreateUserConfig:
-        AllowAdminCreateUserOnly: true
       Policies:
         PasswordPolicy:
           MinimumLength: 12
           RequireUppercase: true
           RequireLowercase: true
           RequireNumbers: true
-
   TeamClient:
     Type: AWS::Cognito::UserPoolClient
     Properties:
       UserPoolId: !Ref TeamUsers
       GenerateSecret: false
-      # Authorization Code + PKCE (the implicit grant is deprecated).
-      AllowedOAuthFlowsUserPoolClient: true
-      AllowedOAuthFlows: [code]
-      AllowedOAuthScopes: [openid]
-      SupportedIdentityProviders: [COGNITO]
-      CallbackURLs: [!Ref AdminUrl]
-      LogoutURLs: [!Ref AdminUrl]
-      PreventUserExistenceErrors: ENABLED
 
   GalleriesTable:
     Type: AWS::DynamoDB::Table
     Properties:
       BillingMode: PAY_PER_REQUEST
-      AttributeDefinitions:
-        - { AttributeName: id, AttributeType: S }
-        - { AttributeName: createdById, AttributeType: S }
-        - { AttributeName: updatedAt, AttributeType: S }
-        - { AttributeName: slug, AttributeType: S }
+      AttributeDefinitions: [{ AttributeName: id, AttributeType: S }, { AttributeName: createdById, AttributeType: S }, { AttributeName: updatedAt, AttributeType: S }]
       KeySchema: [{ AttributeName: id, KeyType: HASH }]
       GlobalSecondaryIndexes:
         - IndexName: createdById-updatedAt-index
           KeySchema: [{ AttributeName: createdById, KeyType: HASH }, { AttributeName: updatedAt, KeyType: RANGE }]
           Projection: { ProjectionType: ALL }
-        - IndexName: slug-index
-          KeySchema: [{ AttributeName: slug, KeyType: HASH }]
-          Projection: { ProjectionType: ALL }
-
   PhotosTable:
     Type: AWS::DynamoDB::Table
     Properties:
@@ -163,32 +125,22 @@ Resources:
         - IndexName: galleryId-sortOrder-index
           KeySchema: [{ AttributeName: galleryId, KeyType: HASH }, { AttributeName: sortOrder, KeyType: RANGE }]
           Projection: { ProjectionType: ALL }
-
   AuditTable:
     Type: AWS::DynamoDB::Table
     Properties:
       BillingMode: PAY_PER_REQUEST
-      AttributeDefinitions:
-        - { AttributeName: id, AttributeType: S }
-        - { AttributeName: galleryId, AttributeType: S }
-        - { AttributeName: createdAt, AttributeType: S }
+      AttributeDefinitions: [{ AttributeName: id, AttributeType: S }]
       KeySchema: [{ AttributeName: id, KeyType: HASH }]
-      TimeToLiveSpecification: { AttributeName: ttl, Enabled: true }
-      GlobalSecondaryIndexes:
-        - IndexName: galleryId-createdAt-index
-          KeySchema: [{ AttributeName: galleryId, KeyType: HASH }, { AttributeName: createdAt, KeyType: RANGE }]
-          Projection: { ProjectionType: ALL }
 
   PhotoBucket:
     Type: AWS::S3::Bucket
     Properties:
       CorsConfiguration:
         CorsRules:
-          - AllowedOrigins: [!Ref AllowedOrigin]
+          - AllowedOrigins: ['https://krasen2000kstanev-hub.github.io']
             AllowedMethods: [GET, PUT, HEAD]
             AllowedHeaders: ['*']
             ExposedHeaders: [ETag]
-            MaxAge: 600
       BucketEncryption: { ServerSideEncryptionConfiguration: [{ ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 } }] }
       PublicAccessBlockConfiguration:
         BlockPublicAcls: true

@@ -1,21 +1,42 @@
 <!doctype html>
 <html lang="bg">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="robots" content="noindex,nofollow">
-  <meta name="referrer" content="no-referrer">
-  <title>Pixiset — Админ</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Playfair+Display:wght@500;600&display=swap">
-  <link rel="stylesheet" href="site.css">
-</head>
-<body class="admin">
-  <main id="root" class="page" aria-live="polite">
-    <p class="muted">Зареждане…</p>
-  </main>
-  <noscript><p class="page">Нужен е JavaScript, за да работи админ панелът.</p></noscript>
-  <script type="module" src="admin.js"></script>
-</body>
-</html>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Pixiset — Admin</title><link rel="stylesheet" href="mobile.css?v=1">
+<style>
+body{margin:0;background:#171614;color:#f5f1e8;font:16px system-ui,sans-serif}main{max-width:760px;margin:auto;padding:48px 6vw}h1{font:48px Georgia,serif;font-weight:400}.card{border:1px solid #ffffff22;padding:24px;margin:24px 0;background:#ffffff08}input,button{font:inherit;padding:12px;border-radius:4px;border:1px solid #ffffff33;background:#ffffff12;color:inherit}input{display:block;width:100%;margin:8px 0 12px;box-sizing:border-box}button{cursor:pointer;background:#d7ad76;color:#171614;border:0;font-weight:600}.muted{color:#ffffff99}.gallery{padding:12px 0;border-top:1px solid #ffffff22}.meta{color:#ffffff99;font-size:13px;margin:8px 0}.progress{height:8px;background:#ffffff18;border-radius:99px;overflow:hidden;margin:10px 0}.progress i{display:block;height:100%;width:0;background:#d7ad76;transition:width .15s}.file{font-size:13px;color:#fff9;margin:5px 0}.cover{width:100%;max-height:260px;object-fit:cover;margin:12px 0;border:1px solid #d7ad76}.photo{display:flex;gap:10px;align-items:center;margin:8px 0}.photo img{width:70px;height:52px;object-fit:cover}.photo button{padding:7px 10px;font-size:13px}
+</style>
+<style>.galleryMeta{display:grid;grid-template-columns:1fr 180px auto;gap:8px;align-items:end;margin:12px 0}.galleryMeta label{font-size:12px;color:#ffffff99}@media(max-width:600px){.galleryMeta{grid-template-columns:1fr}.galleryMeta button{width:100%}}</style>
+<style>#topButton{position:fixed;right:22px;bottom:22px;display:none;border:0;border-radius:999px;padding:12px 16px;box-shadow:0 4px 16px #0008;z-index:5}</style>
+<style>[data-cancel-upload]{display:none}</style>
+<style>.photo{gap:14px;margin:12px 0}.photo img{width:180px;height:130px}</style>
+<main>
+  <p class="muted">PIX ISET / TEAM</p><h1>Admin gallery</h1>
+  <div id="login" class="card"><p>Влез като член на екипа, за да управляваш галериите.</p><button id="loginButton">Вход с AWS</button></div>
+  <section id="app" hidden>
+    <div class="card admin-toolbar"><button id="logoutButton" type="button">Изход</button><input id="gallerySearch" type="search" placeholder="Търси галерия…" aria-label="Търси галерия"><select id="galleryFilter" aria-label="Филтър по статус"><option value="ALL">Всички статуси</option><option value="PUBLISHED">Публикувани</option><option value="DRAFT">Чернови</option></select></div>
+    <div class="card"><form id="create"><label>Име на галерията<input name="title" required placeholder="Сватба — Иванови"></label><label>Описание<input name="description" placeholder="Септември 2026"></label><button>Създай галерия</button></form></div>
+    <div class="card"><h2>Моите галерии</h2><div id="list" class="muted">Зареждане…</div></div>
+  </section>
+</main>
+<script>
+const API='https://9hi9hsm4n1.execute-api.us-east-1.amazonaws.com';
+const COGNITO='https://pixiset-gallery-674948790853.auth.us-east-1.amazoncognito.com';
+const CLIENT='3fleqt4pgl9a7hr5snddok64qs';
+const REDIRECT=location.origin+location.pathname;
+let token=sessionStorage.getItem('pixiset_token');
+if(location.hash.includes('access_token=')){token=new URLSearchParams(location.hash.slice(1)).get('access_token');sessionStorage.setItem('pixiset_token',token);history.replaceState({},'',REDIRECT)}
+document.querySelector('#logoutButton').onclick=()=>{sessionStorage.removeItem('pixiset_token');token=null;show()};
+const api=(path,opt={})=>fetch(API+path,{...opt,headers:{'content-type':'application/json',Authorization:`Bearer ${token}`}}).then(async r=>{if(r.status===401){sessionStorage.removeItem('pixiset_token');token=null;show();throw new Error('Сесията е изтекла. Влез отново.')}if(!r.ok)throw new Error(`${r.status}: ${await r.text()}`);return r.json()});
+function show(){document.querySelector('#login').hidden=!!token;document.querySelector('#app').hidden=!token;if(token)load()}
+document.querySelector('#loginButton').onclick=()=>location.href=`${COGNITO}/oauth2/authorize?response_type=token&client_id=${CLIENT}&redirect_uri=${encodeURIComponent(REDIRECT)}&scope=openid`;
+document.querySelector('#create').onsubmit=async e=>{e.preventDefault();const f=new FormData(e.target);try{await api('/admin/galleries',{method:'POST',body:JSON.stringify({title:f.get('title'),description:f.get('description')})});e.target.reset();load()}catch(err){alert(err.message)}};
+const mb=n=>(n/1024/1024).toFixed(2)+' MB';
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+async function load(){const box=document.querySelector('#list');try{const data=await api('/admin/galleries');box.innerHTML=data.galleries.length?data.galleries.map(g=>`<div class="gallery" data-id="${esc(g.id)}"><strong>${esc(g.title||'Без име')}</strong><br><span class="muted">${esc(g.status)} · ${esc(g.id)}</span><div id="summary-${esc(g.id)}" class="meta">Снимки в галерията: ${g.photoCount||0} · Общо: ${mb(g.photoBytes||0)}</div><div id="files-${esc(g.id)}"></div><input type="file" multiple accept="image/*" data-gallery="${esc(g.id)}"><button data-upload="${esc(g.id)}">Качи снимки</button><button type="button" data-cancel-upload="${esc(g.id)}" disabled>Откажи</button><span id="status-${esc(g.id)}" class="muted" role="status" aria-live="polite"></span><div class="progress"><i id="bar-${esc(g.id)}"></i></div></div>`).join(''):'Все още няма галерии.';await Promise.all(data.galleries.map(loadPhotos))}catch(err){box.textContent=err.message}}
+async function loadPhotos(g){try{const data=await api(`/admin/galleries/${encodeURIComponent(g.id)}/photos`);const total=data.photos.reduce((n,p)=>n+(p.size||0),0);document.querySelector(`#summary-${CSS.escape(g.id)}`).textContent=`Качени: ${data.photos.length} снимки · ${mb(total)}`;const cover=data.photos.find(p=>p.id===g.coverPhotoId);document.querySelector(`#files-${CSS.escape(g.id)}`).innerHTML=(cover?`<img class="cover" src="${esc(cover.url)}" alt="Корица"><div class="meta">Текуща корица: ${esc(cover.filename)}</div>`:'<div class="meta">Няма избрана корица.</div>')+data.photos.map(p=>`<div class="photo"><img src="${esc(p.url)}" alt=""><span class="file">${esc(p.filename)} · ${mb(p.size||0)}</span><button data-cover="${esc(p.id)}" data-gallery="${esc(g.id)}">${p.id===g.coverPhotoId?'Избрана корица':'Избери за корица'}</button></div>`).join('')}catch(err){document.querySelector(`#summary-${CSS.escape(g.id)}`).textContent=err.message}}
+function put(url,file,onProgress){return new Promise((resolve,reject)=>{const x=new XMLHttpRequest();x.open('PUT',url);x.setRequestHeader('Content-Type',file.type);x.upload.onprogress=e=>e.lengthComputable&&onProgress(e.loaded);x.onload=()=>x.status<300?resolve():reject(new Error(`S3 ${x.status}`));x.onerror=()=>reject(new Error('Мрежова грешка'));x.send(file)})}
+document.querySelector('#list').onclick=async e=>{const cover=e.target.dataset.cover;if(cover){try{await api(`/admin/galleries/${e.target.dataset.gallery}`,{method:'PATCH',body:JSON.stringify({coverPhotoId:cover})});await load();}catch(err){alert(err.message)}return}const id=e.target.dataset.upload;if(!id)return;const input=document.querySelector(`input[data-gallery="${id}"]`);const status=document.querySelector(`#status-${id}`);const bar=document.querySelector(`#bar-${id}`);if(!input.files.length)return status.textContent=' Избери снимки.';const files=[...input.files],bad=files.find(f=>!['image/jpeg','image/png','image/webp'].includes(f.type)||f.size>50*1024*1024);if(bad)return status.textContent=` Невалиден файл: ${bad.name}. Приемат се JPEG, PNG и WebP до 50 MB.`;const total=files.reduce((n,f)=>n+f.size,0);let done=0;status.textContent=` 0 / ${files.length} · 0 / ${mb(total)}`;try{for(const file of files){const {url}=await api(`/admin/galleries/${id}/upload`,{method:'POST',body:JSON.stringify({filename:file.name,contentType:file.type,size:file.size})});await put(url,file,loaded=>{const current=done+loaded;bar.style.width=`${Math.round(current/total*100)}%`;status.textContent=` ${done} / ${files.length} · ${mb(current)} / ${mb(total)}`});done++;}status.textContent=` Готово: ${done} снимки · ${mb(total)}`;await loadPhotos({id});input.value=''}catch(err){status.textContent=` Грешка: ${err.message}`}};
+const originalFetch=window.fetch;window.fetch=(url,opt={})=>{if(String(url).includes('/upload')&&opt.body){const data=JSON.parse(opt.body);const input=document.querySelector(`input[data-gallery="${url.split('/admin/galleries/')[1].split('/')[0]}"]`);const select=input?.parentElement.querySelector('select[data-set]');if(select){data.setName=select.value;opt.body=JSON.stringify(data)}}return originalFetch(url,opt)};
+const addSetControls=()=>document.querySelectorAll('input[data-gallery]').forEach(input=>{if(input.previousElementSibling?.className==='sets')return;const id=input.dataset.gallery;const box=document.createElement('div');box.className='sets';box.innerHTML=`<select data-set><option>Highlights</option></select><button type="button">+ Нов сет</button>`;box.querySelector('button').onclick=async()=>{const name=prompt('Име на новия сет:');if(!name)return;const select=box.querySelector('select');const sets=[...select.options].map(o=>o.value);if(!sets.includes(name)){sets.push(name);await api('/admin/galleries/'+id,{method:'PATCH',body:JSON.stringify({sets})});const option=document.createElement('option');option.textContent=name;select.append(option);select.value=name}};input.before(box)});new MutationObserver(addSetControls).observe(document.querySelector('#list'),{childList:true,subtree:true});show();
+</script><script src="photo-actions.js"></script><script src="gallery-links.js"></script><script src="back-to-top.js"></script><script src="performance.js?v=1"></script><script src="admin-ui.js?v=1"></script><script src="admin-ui-fix.js?v=1"></script><script src="thumbnail-upload.js?v=1"></script><script src="gallery-cards.js?v=5"></script><script src="admin-catalog-fix.js?v=1"></script><script src="gallery-cover-fallback.js?v=1"></script><script src="publish-controls.js?v=1"></script><script src="admin-filters.js?v=1"></script><script src="release-check.js?v=1"></script>
+

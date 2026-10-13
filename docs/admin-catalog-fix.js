@@ -1,0 +1,1 @@
+const catalogFix=document.createElement('style');catalogFix.textContent='.gallery[data-collapsed="1"] [id^="files-"]{display:block!important}.gallery[data-collapsed="1"] [id^="files-"] .photo,.gallery[data-collapsed="1"] [id^="files-"] .meta{display:none!important}.gallery[data-collapsed="1"] [id^="files-"] .cover{display:block!important}';document.head.append(catalogFix);

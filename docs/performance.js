@@ -1,0 +1,1 @@
+const optimizeImages=()=>document.querySelectorAll('img').forEach(img=>{img.loading='lazy';img.decoding='async';img.style.contentVisibility='auto'});optimizeImages();new MutationObserver(optimizeImages).observe(document.body,{childList:true,subtree:true});
