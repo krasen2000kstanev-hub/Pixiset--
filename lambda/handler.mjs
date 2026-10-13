@@ -1,11 +1,17 @@
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { BatchGetCommand, BatchWriteCommand, DeleteCommand, DynamoDBDocumentClient, GetCommand, PutCommand, QueryCommand, ScanCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
-import { DeleteObjectsCommand, GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { DeleteObjectsCommand, GetObjectCommand, HeadObjectCommand, ListObjectsV2Command, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { randomBytes, randomUUID, scryptSync, timingSafeEqual } from "node:crypto";
 
-const db = DynamoDBDocumentClient.from(new DynamoDBClient({}));
-const s3 = new S3Client({});
+let db = DynamoDBDocumentClient.from(new DynamoDBClient({}));
+let s3 = new S3Client({});
+let presign = getSignedUrl;
+
+/** Test seam: swap the AWS clients so tests can run against in-memory fakes and never touch the network. */
+export function __useAws(clients) {
+  ({ db = db, s3 = s3, presign = presign } = clients);
+}
 
 const MAX_UPLOAD = 50 * 1024 * 1024;
 const IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
@@ -13,6 +19,10 @@ const STATUSES = new Set(["DRAFT", "PUBLISHED"]);
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const AUDIT_TTL_SECONDS = 2 * 365 * 24 * 3600;
+const PAGE_SIZE = 800; // keeps one response far below the 6 MB Lambda payload limit
+const ARCHIVE_MAX = 2000;
+const VIEW_URL_TTL = 3600;
+const ARCHIVE_URL_TTL = 6 * 3600;
 
 class HttpError extends Error {
   constructor(statusCode, code) {
@@ -97,6 +107,40 @@ const adminGallery = (g, counts = {}, coverUrl = null) => {
   return { ...rest, hasPassword: Boolean(passwordHash), photoCount: counts.count || 0, photoBytes: counts.bytes || 0, coverUrl };
 };
 
+export const encodeCursor = (key) => Buffer.from(JSON.stringify(key)).toString("base64url");
+
+export function decodeCursor(cursor, galleryId) {
+  try {
+    const key = JSON.parse(Buffer.from(String(cursor), "base64url").toString("utf8"));
+    if (typeof key?.id === "string" && key.galleryId === galleryId && typeof key.sortOrder === "number") return { id: key.id, galleryId, sortOrder: key.sortOrder };
+  } catch { /* fall through */ }
+  throw new HttpError(400, "invalid-cursor");
+}
+
+/**
+ * Manual ordering. `order` is the desired order of some photos of a gallery.
+ * Those photos keep the *slots* they already occupy in the global order and are
+ * refilled in the requested order, so photos not mentioned never move.
+ * Returns the minimal list of {id, sortOrder} updates, or null for invalid input.
+ */
+export function planReorder(photos, order) {
+  const ids = [...new Set(Array.isArray(order) ? order.map(String) : [])];
+  const byId = new Map(photos.map((p) => [p.id, p]));
+  if (ids.length < 2 || ids.some((id) => !byId.has(id))) return null;
+
+  const list = [...photos].sort((a, b) => (Number(a.sortOrder) - Number(b.sortOrder)) || String(a.id).localeCompare(String(b.id)));
+  let values = list.map((p) => Number(p.sortOrder) || 0);
+  // Legacy rows can share a sortOrder. Renumber everything once so slots are unambiguous.
+  if (values.some((v, i) => i > 0 && v <= values[i - 1])) values = list.map((_, i) => (i + 1) * 1000);
+
+  const position = new Map(list.map((p, i) => [p.id, i]));
+  const slots = ids.map((id) => position.get(id)).sort((a, b) => a - b);
+  const next = new Map(list.map((p, i) => [p.id, values[i]]));
+  ids.forEach((id, k) => next.set(id, values[slots[k]]));
+
+  return list.filter((p) => next.get(p.id) !== Number(p.sortOrder)).map((p) => ({ id: p.id, sortOrder: next.get(p.id) }));
+}
+
 // ---------- DynamoDB / S3 helpers ----------
 
 const T = {
@@ -140,8 +184,17 @@ async function lookup(table, index, attr, value) {
 
 const getItem = async (table, id) => (await db.send(new GetCommand({ TableName: table, Key: { id } }))).Item;
 const photosOf = (galleryId) => queryAll({ TableName: T.photos(), IndexName: "galleryId-sortOrder-index", KeyConditionExpression: "galleryId = :g", ExpressionAttributeValues: { ":g": galleryId } });
-const sign = (key, extra = {}, expiresIn = 3600) => getSignedUrl(s3, new GetObjectCommand({ Bucket: process.env.PHOTO_BUCKET, Key: key, ...extra }), { expiresIn });
-const signPut = (key, contentType) => getSignedUrl(s3, new PutObjectCommand({ Bucket: process.env.PHOTO_BUCKET, Key: key, ContentType: contentType }), { expiresIn: 900 });
+
+async function photosPage(galleryId, cursor) {
+  const r = await db.send(new QueryCommand({
+    TableName: T.photos(), IndexName: "galleryId-sortOrder-index", KeyConditionExpression: "galleryId = :g", ExpressionAttributeValues: { ":g": galleryId },
+    Limit: PAGE_SIZE, ExclusiveStartKey: cursor ? decodeCursor(cursor, galleryId) : undefined,
+  }));
+  return { items: r.Items || [], next: r.LastEvaluatedKey ? encodeCursor(r.LastEvaluatedKey) : null };
+}
+
+const sign = (key, extra = {}, expiresIn = VIEW_URL_TTL) => presign(s3, new GetObjectCommand({ Bucket: process.env.PHOTO_BUCKET, Key: key, ...extra }), { expiresIn });
+const signPut = (key, contentType) => presign(s3, new PutObjectCommand({ Bucket: process.env.PHOTO_BUCKET, Key: key, ContentType: contentType }), { expiresIn: 900 });
 
 const ipOf = (event) => event.requestContext?.http?.sourceIp || null;
 
@@ -165,11 +218,49 @@ async function audit(event, action, data = {}) {
   }
 }
 
+/** Audit events of one gallery, newest first. Index first, scan until the index exists. */
+async function auditOf(galleryId, { since, limit = 1000 } = {}) {
+  try {
+    const r = await db.send(new QueryCommand({
+      TableName: T.audit(), IndexName: "galleryId-createdAt-index",
+      KeyConditionExpression: since ? "galleryId = :g AND createdAt > :t" : "galleryId = :g",
+      ExpressionAttributeValues: since ? { ":g": galleryId, ":t": since } : { ":g": galleryId },
+      ScanIndexForward: false, Limit: limit,
+    }));
+    return r.Items || [];
+  } catch (error) {
+    if (error.name !== "ValidationException") throw error; // ponytail: remove fallback once index is live
+    return (await scanAll({ TableName: T.audit(), FilterExpression: "galleryId = :g", ExpressionAttributeValues: { ":g": galleryId } }))
+      .filter((e) => !since || e.createdAt > since)
+      .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))
+      .slice(0, limit);
+  }
+}
+
+/** True when this IP already did `action` on this gallery `max` times within the window. */
+async function rateLimited(event, galleryId, action, max, windowSeconds) {
+  const ip = ipOf(event);
+  if (!ip) return false;
+  const since = new Date(Date.now() - windowSeconds * 1000).toISOString();
+  const events = await auditOf(galleryId, { since });
+  return events.filter((e) => e.action === action && e.ip === ip).length >= max;
+}
+
 async function deleteObjects(keys) {
   for (let i = 0; i < keys.length; i += 1000) {
     const res = await s3.send(new DeleteObjectsCommand({ Bucket: process.env.PHOTO_BUCKET, Delete: { Objects: keys.slice(i, i + 1000).map((Key) => ({ Key })), Quiet: true } }));
     if (res.Errors?.length) throw new Error(`S3 delete failed: ${res.Errors[0].Code}`);
   }
+}
+
+/** Delete everything under a prefix, including objects with no database row (failed uploads). */
+async function deletePrefix(prefix) {
+  let token;
+  do {
+    const r = await s3.send(new ListObjectsV2Command({ Bucket: process.env.PHOTO_BUCKET, Prefix: prefix, ContinuationToken: token }));
+    await deleteObjects((r.Contents || []).map((o) => o.Key));
+    token = r.IsTruncated ? r.NextContinuationToken : undefined;
+  } while (token);
 }
 
 async function deletePhotoItems(ids) {
@@ -181,6 +272,11 @@ async function deletePhotoItems(ids) {
     }
     if (requests.length) throw new Error("photo delete incomplete");
   }
+}
+
+/** Run async work over items with a small concurrency cap. */
+async function mapLimit(items, limit, fn) {
+  for (let i = 0; i < items.length; i += limit) await Promise.all(items.slice(i, i + limit).map(fn));
 }
 
 const photoKeys = (p) => [p.key, p.thumbKey, p.displayKey].filter(Boolean);
@@ -203,17 +299,29 @@ async function findGallery(ref) {
   return ref.slug !== undefined ? lookup(T.galleries(), "slug-index", "slug", ref.slug) : getItem(T.galleries(), ref.id);
 }
 
-const openGallery = async (event, ref) => assertVisible(await findGallery(ref), event.headers?.["x-gallery-password"]);
+async function openGallery(event, ref) {
+  const gallery = await findGallery(ref);
+  const given = event.headers?.["x-gallery-password"];
+  const guessing = Boolean(given && gallery?.status === "PUBLISHED" && gallery.passwordHash);
+  if (guessing && (await rateLimited(event, gallery.id, "PASSWORD_FAIL", 8, 600))) throw new HttpError(429, "too-many-attempts");
+  try {
+    return assertVisible(gallery, given);
+  } catch (error) {
+    if (guessing && error.message === "password-required") await audit(event, "PASSWORD_FAIL", { galleryId: gallery.id });
+    throw error;
+  }
+}
 
 const galleryRef = (parts) => (parts[1] === "slug" ? { slug: decodeURIComponent(parts[2] || "") } : { id: parts[1] });
 
 async function viewGallery(event, parts) {
   const gallery = await openGallery(event, galleryRef(parts));
-  const photos = await photosOf(gallery.id);
-  await audit(event, "CLIENT_VISIT", { galleryId: gallery.id });
+  const cursor = event.queryStringParameters?.cursor;
+  const page = await photosPage(gallery.id, cursor);
+  if (!cursor) await audit(event, "CLIENT_VISIT", { galleryId: gallery.id });
   return json({
     gallery: publicGallery(gallery),
-    photos: await Promise.all(photos.map(async (p) => ({
+    photos: await Promise.all(page.items.map(async (p) => ({
       id: p.id,
       filename: p.filename,
       setName: p.setName || "Highlights",
@@ -223,6 +331,7 @@ async function viewGallery(event, parts) {
       url: await sign(p.thumbKey || p.displayKey || p.key),
       displayUrl: await sign(p.displayKey || p.key),
     }))),
+    nextCursor: page.next,
   });
 }
 
@@ -239,8 +348,34 @@ async function download(event) {
   return json({ url, filename: photo.filename });
 }
 
+/** One call returns presigned originals for the whole gallery (or a selection); the browser zips them. */
+async function archiveUrls(event, parts) {
+  const gallery = await openGallery(event, galleryRef(parts));
+  if (gallery.downloadEnabled === false) throw new HttpError(403, "downloads-disabled");
+  if (await rateLimited(event, gallery.id, "DOWNLOAD_ARCHIVE", 20, 3600)) throw new HttpError(429, "too-many-requests");
+  const input = body(event);
+  const scope = Array.isArray(input.photoIds) ? "selection" : "all";
+  let photos = await photosOf(gallery.id);
+  if (scope === "selection") {
+    const wanted = new Set(input.photoIds.map(String));
+    photos = photos.filter((p) => wanted.has(p.id));
+  }
+  if (!photos.length) throw new HttpError(400, "empty-selection");
+  if (photos.length > ARCHIVE_MAX) throw new HttpError(413, "too-many-photos");
+  const files = await Promise.all(photos.map(async (p) => ({
+    id: p.id,
+    filename: p.filename,
+    setName: p.setName || "Highlights",
+    size: Number(p.size) || 0,
+    url: await sign(p.key, {}, ARCHIVE_URL_TTL),
+  })));
+  await audit(event, "DOWNLOAD_ARCHIVE", { galleryId: gallery.id, scope, count: files.length, bytes: files.reduce((n, f) => n + f.size, 0) });
+  return json({ title: gallery.title, files });
+}
+
 async function submitSelection(event, parts) {
   const gallery = await openGallery(event, galleryRef(parts));
+  if (await rateLimited(event, gallery.id, "SELECTION", 10, 3600)) throw new HttpError(429, "too-many-requests");
   const input = body(event);
   const name = trim(input.name, 120);
   const email = trim(input.email, 200).toLowerCase();
@@ -262,7 +397,7 @@ const requireTeam = (event) => {
   return claims;
 };
 
-/** Builds a DynamoDB update from already-validated-for-existence input. Shape validation happens here. */
+/** Builds a DynamoDB update expression. Shape validation happens here. */
 function patchGallery(input) {
   const names = {};
   const values = { ":updatedAt": new Date().toISOString() };
@@ -339,7 +474,7 @@ async function admin(event, method, path) {
       const coverIds = galleries.map((g) => g.coverPhotoId).filter(Boolean);
       const covers = {};
       for (let i = 0; i < coverIds.length; i += 100) {
-        const r = await db.send(new BatchGetCommand({ RequestItems: { [T.photos()]: { Keys: coverIds.slice(i, i + 100).map((id) => ({ id })) } } }));
+        const r = await db.send(new BatchGetCommand({ RequestItems: { [T.photos()]: { Keys: coverIds.slice(i, i + 100).map((cid) => ({ id: cid })) } } }));
         for (const p of r.Responses?.[T.photos()] || []) covers[p.id] = p;
       }
       return json({
@@ -387,6 +522,12 @@ async function admin(event, method, path) {
       }
       const plan = patchGallery(input);
       const r = await db.send(new UpdateCommand({ TableName: T.galleries(), Key: { id }, UpdateExpression: plan.expression, ConditionExpression: "attribute_exists(id)", ExpressionAttributeNames: plan.names, ExpressionAttributeValues: plan.values, ReturnValues: "ALL_NEW" }));
+      if (plan.changed.includes("sets")) {
+        // Photos of a removed set move to the first remaining set instead of disappearing from the admin filter.
+        const current = r.Attributes.sets;
+        const orphans = (await photosOf(id)).filter((p) => !current.includes(p.setName || "Highlights"));
+        await mapLimit(orphans, 20, (p) => db.send(new UpdateCommand({ TableName: T.photos(), Key: { id: p.id }, UpdateExpression: "SET setName = :s", ExpressionAttributeValues: { ":s": current[0] } })));
+      }
       await audit(event, "GALLERY_UPDATED", { galleryId: id, fields: plan.changed });
       return json({ gallery: adminGallery(r.Attributes) });
     }
@@ -394,7 +535,7 @@ async function admin(event, method, path) {
     case "DELETE galleries/:id": {
       if (!(await getItem(T.galleries(), id))) throw new HttpError(404, "not-found");
       const photos = await photosOf(id);
-      await deleteObjects(photos.flatMap(photoKeys));
+      await Promise.all([`originals/${id}/`, `thumbs/${id}/`, `display/${id}/`].map(deletePrefix));
       await deletePhotoItems(photos.map((p) => p.id));
       await db.send(new DeleteCommand({ TableName: T.galleries(), Key: { id } }));
       await audit(event, "GALLERY_DELETED", { galleryId: id, photos: photos.length });
@@ -407,9 +548,17 @@ async function admin(event, method, path) {
         photos: await Promise.all(photos.map(async (p) => ({
           id: p.id, filename: p.filename, setName: p.setName || "Highlights", size: p.size || 0, width: p.width || null, height: p.height || null,
           url: await sign(p.thumbKey || p.displayKey || p.key, {}, 900),
-          displayUrl: await sign(p.displayKey || p.key, {}, 900),
         }))),
       });
+    }
+
+    case "POST galleries/:id/order": {
+      if (!(await getItem(T.galleries(), id))) throw new HttpError(404, "not-found");
+      const updates = planReorder(await photosOf(id), input.order);
+      if (!updates) throw new HttpError(400, "invalid-order");
+      await mapLimit(updates, 20, (u) => db.send(new UpdateCommand({ TableName: T.photos(), Key: { id: u.id }, UpdateExpression: "SET sortOrder = :s", ConditionExpression: "attribute_exists(id)", ExpressionAttributeValues: { ":s": u.sortOrder } })));
+      await audit(event, "PHOTOS_REORDERED", { galleryId: id, moved: updates.length });
+      return json({ ok: true, moved: updates.length });
     }
 
     case "POST galleries/:id/upload": {
@@ -444,9 +593,9 @@ async function admin(event, method, path) {
       const size = Number(original.ContentLength) || upload.size;
       if (size > MAX_UPLOAD) throw new HttpError(400, "invalid-image");
       const dim = (v) => (Number.isSafeInteger(Number(v)) && Number(v) > 0 && Number(v) < 100000 ? Number(v) : undefined);
-      const setName = (gallery.sets || ["Highlights"]).includes(input.setName) ? input.setName : (gallery.sets || ["Highlights"])[0];
+      const sets = gallery.sets?.length ? gallery.sets : ["Highlights"];
       const item = {
-        id: photoId, galleryId: id, key: keys.key, filename: upload.filename, setName, size, contentType: upload.contentType,
+        id: photoId, galleryId: id, key: keys.key, filename: upload.filename, setName: sets.includes(input.setName) ? input.setName : sets[0], size, contentType: upload.contentType,
         sortOrder: Number.isSafeInteger(Number(input.sortOrder)) ? Number(input.sortOrder) : Date.now(),
         createdAt: new Date().toISOString(), createdById: actor.sub,
       };
@@ -465,13 +614,7 @@ async function admin(event, method, path) {
     }
 
     case "GET galleries/:id/activity": {
-      let events;
-      try {
-        events = (await db.send(new QueryCommand({ TableName: T.audit(), IndexName: "galleryId-createdAt-index", KeyConditionExpression: "galleryId = :g", ExpressionAttributeValues: { ":g": id }, ScanIndexForward: false, Limit: 300 }))).Items || [];
-      } catch (error) {
-        if (error.name !== "ValidationException") throw error; // ponytail: remove fallback once index is live
-        events = (await scanAll({ TableName: T.audit(), FilterExpression: "galleryId = :g", ExpressionAttributeValues: { ":g": id } })).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt))).slice(0, 300);
-      }
+      const events = await auditOf(id, { limit: 1000 });
       return json({ events: events.map(({ ttl, ...e }) => e) });
     }
 
@@ -520,6 +663,7 @@ export async function handler(event) {
       const parts = path.split("/").filter(Boolean);
       if (method === "GET") return await viewGallery(event, parts);
       if (method === "POST" && parts.at(-1) === "selection") return await submitSelection(event, parts);
+      if (method === "POST" && parts.at(-1) === "downloads") return await archiveUrls(event, parts);
     }
     if (path.startsWith("/admin/")) return await admin(event, method, path);
     throw new HttpError(404, "not-found");

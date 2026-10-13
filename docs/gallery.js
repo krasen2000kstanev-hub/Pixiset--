@@ -1,11 +1,13 @@
 import { config } from "./config.js";
-import { h, ask, toast, fmtDate, sleep } from "./common.js";
+import { h, ask, toast, fmtBytes, fmtDate, local, session } from "./common.js";
+import { downloadArchive } from "./archive.js";
 
 const root = document.querySelector("#root");
 const params = new URLSearchParams(location.search);
-const ref = params.get("slug") ? `slug/${encodeURIComponent(params.get("slug"))}` : params.get("id") ? encodeURIComponent(params.get("id")) : "";
+// An id never changes, a slug can be edited by the photographer, so prefer the id when a link has both.
+const ref = params.get("id") ? encodeURIComponent(params.get("id")) : params.get("slug") ? `slug/${encodeURIComponent(params.get("slug"))}` : "";
 const pwKey = `pixiset-pw:${ref}`;
-let password = sessionStorage.getItem(pwKey) || "";
+let password = session.get(pwKey) || "";
 
 const gfetch = (path, init = {}) =>
   fetch(config.api + path, { ...init, headers: { ...(init.headers || {}), ...(password ? { "x-gallery-password": password } : {}) } });
@@ -17,6 +19,8 @@ const state = (title, text, ...actions) =>
 
 const skeleton = () => root.replaceChildren(h("div", { class: "skeleton", "aria-label": "Зареждане" }, Array.from({ length: 12 }, () => h("i"))));
 
+const retry = () => h("button", { class: "btn btn-primary", onclick: () => load() }, "Опитай пак");
+
 function gate(message) {
   const input = h("input", { type: "password", required: true, autocomplete: "current-password", "aria-label": "Парола", placeholder: "Парола" });
   const error = h("p", { role: "alert", style: "color:var(--error);margin:0", hidden: !message }, message || "");
@@ -26,7 +30,7 @@ function gate(message) {
     h("form", { class: "row", style: "justify-content:center", onsubmit: (e) => {
       e.preventDefault();
       password = input.value;
-      sessionStorage.setItem(pwKey, password);
+      session.set(pwKey, password);
       load(true);
     } }, input, h("button", { class: "btn btn-primary", type: "submit" }, "Отвори")),
     error));
@@ -38,17 +42,26 @@ function gate(message) {
 async function load(fromGate = false) {
   if (!ref) return state("Галерията не е намерена", "Линкът изглежда непълен. Поискай нов от фотографа.");
   skeleton();
-  let res;
   try {
-    res = await gfetch(`/galleries/${ref}`);
+    let res = await gfetch(`/galleries/${ref}`);
+    if (res.status === 401) { session.remove(pwKey); password = ""; return gate(fromGate ? "Паролата не е вярна." : ""); }
+    if (res.status === 429) return state("Твърде много опити", "Опитай отново след няколко минути.");
+    if (res.status === 404) return state("Галерията не е намерена", "Линкът може да е неточен или галерията още не е публикувана.");
+    if (res.status === 410) return state("Достъпът е изтекъл", "Срокът на тази галерия е изтекъл. Свържи се с фотографа.");
+    if (!res.ok) return state("Нещо се обърка", "Опитай отново след малко.", retry());
+    const data = await res.json();
+    // Big galleries arrive in pages so no single response gets too large.
+    for (let guard = 0; data.nextCursor && guard < 50; guard++) {
+      res = await gfetch(`/galleries/${ref}?cursor=${encodeURIComponent(data.nextCursor)}`);
+      if (!res.ok) throw new Error(`page ${res.status}`);
+      const page = await res.json();
+      data.photos.push(...page.photos);
+      data.nextCursor = page.nextCursor;
+    }
+    render(data);
   } catch {
-    return state("Няма връзка", "Провери интернета и опитай отново.", h("button", { class: "btn btn-primary", onclick: () => load() }, "Опитай пак"));
+    state("Няма връзка", "Провери интернета и опитай отново.", retry());
   }
-  if (res.status === 401) { sessionStorage.removeItem(pwKey); password = ""; return gate(fromGate ? "Паролата не е вярна." : ""); }
-  if (res.status === 404) return state("Галерията не е намерена", "Линкът може да е неточен или галерията още не е публикувана.");
-  if (res.status === 410) return state("Достъпът е изтекъл", "Срокът на тази галерия е изтекъл. Свържи се с фотографа.");
-  if (!res.ok) return state("Нещо се обърка", "Опитай отново след малко.", h("button", { class: "btn btn-primary", onclick: () => load() }, "Опитай пак"));
-  render(await res.json());
 }
 
 // ---------- gallery ----------
@@ -56,12 +69,14 @@ async function load(fromGate = false) {
 function render({ gallery, photos }) {
   document.title = gallery.title;
   const favKey = `pixiset-fav:${gallery.id}`;
-  let favorites = new Set(JSON.parse(localStorage.getItem(favKey) || "[]"));
+  let favorites = new Set();
+  try { favorites = new Set(JSON.parse(local.get(favKey) || "[]")); } catch { /* corrupted value: start empty */ }
+  favorites = new Set([...favorites].filter((id) => photos.some((p) => p.id === id))); // drop photos that were deleted
   let activeSet = "ALL";
   let onlyFavorites = false;
-  let busyAll = false;
+  let zip = null; // {controller, progress} while an archive is being built
 
-  const saveFavorites = () => localStorage.setItem(favKey, JSON.stringify([...favorites]));
+  const saveFavorites = () => local.set(favKey, JSON.stringify([...favorites]));
   const setNames = [...new Set([...(gallery.sets || []), ...photos.map((p) => p.setName)])].filter((s) => photos.some((p) => p.setName === s));
   const cover = photos.find((p) => p.id === gallery.coverPhotoId) || photos[0];
 
@@ -96,24 +111,44 @@ function render({ gallery, photos }) {
     }
   }
 
-  async function downloadMany(list, label) {
-    if (busyAll || !list.length) return;
-    const ok = await ask({ title: label, message: `Ще се свалят ${list.length} файла един след друг. Браузърът може да поиска разрешение за няколко сваляния — разреши го.`, ok: "Свали" });
+  async function downloadZip(list, label, selection) {
+    if (zip || !list.length) return;
+    const total = list.reduce((n, p) => n + (p.size || 0), 0);
+    const ok = await ask({
+      title: label, ok: "Свали",
+      message: `ZIP архив с ${list.length} снимки (${fmtBytes(total)}). Файловете се свалят в оригинално качество.${typeof showSaveFilePicker === "function" ? "" : " Големите галерии се разделят на няколко архива."}`,
+    });
     if (!ok) return;
-    busyAll = true;
+    zip = { controller: new AbortController(), progress: null };
     drawBar();
-    for (const [i, photo] of list.entries()) {
-      toast(`Сваляне ${i + 1} от ${list.length}…`);
-      await downloadOne(photo);
-      await sleep(700);
+    try {
+      const result = await downloadArchive({
+        name: gallery.title,
+        signal: zip.controller.signal,
+        onProgress: (p) => { zip.progress = p; drawBar(); },
+        getFiles: async () => {
+          const res = await gfetch(`/galleries/${encodeURIComponent(gallery.id)}/downloads`, {
+            method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(selection ? { photoIds: list.map((p) => p.id) } : {}),
+          });
+          if (res.status === 403) throw new Error("Свалянето е изключено за тази галерия.");
+          if (res.status === 429) throw new Error("Твърде много заявки. Опитай след малко.");
+          if (!res.ok) throw new Error("Архивът не може да се подготви. Опитай пак.");
+          return (await res.json()).files;
+        },
+      });
+      toast(`Готово: ${result.files} снимки${result.parts > 1 ? ` в ${result.parts} архива` : ""}.`, "success");
+    } catch (error) {
+      if (error.name === "AbortError") toast("Свалянето е отказано.");
+      else toast(error.message || "Свалянето не успя. Опитай пак.", "error");
+    } finally {
+      zip = null;
+      drawBar();
     }
-    busyAll = false;
-    drawBar();
   }
 
   async function sendSelection() {
     let saved = {};
-    try { saved = JSON.parse(localStorage.getItem("pixiset-contact") || "{}"); } catch { /* ignore */ }
+    try { saved = JSON.parse(local.get("pixiset-contact") || "{}"); } catch { /* ignore */ }
     const values = await ask({
       title: "Изпрати селекция", ok: "Изпрати",
       message: `Избрани снимки: ${favorites.size}. Фотографът ще ги получи заедно с твоето име.`,
@@ -124,11 +159,12 @@ function render({ gallery, photos }) {
       ],
     });
     if (!values) return;
-    localStorage.setItem("pixiset-contact", JSON.stringify({ name: values.name, email: values.email }));
+    local.set("pixiset-contact", JSON.stringify({ name: values.name, email: values.email }));
     try {
       const res = await gfetch(`/galleries/${encodeURIComponent(gallery.id)}/selection`, {
         method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...values, photoIds: [...favorites] }),
       });
+      if (res.status === 429) return toast("Изпратени са твърде много селекции. Опитай по-късно.", "error");
       if (!res.ok) throw new Error();
       toast("Селекцията е изпратена. Благодарим!", "success");
     } catch {
@@ -142,11 +178,15 @@ function render({ gallery, photos }) {
         h("button", { class: "btn btn-small", "aria-pressed": String(activeSet === value), onclick: () => { activeSet = value; drawBar(); drawGrid(); } }, label))
       : []));
     const favPhotos = photos.filter((p) => favorites.has(p.id));
+    const busy = Boolean(zip);
+    const p = zip?.progress;
     actions.replaceChildren(...[
       h("button", { class: "btn btn-small", "aria-pressed": String(onlyFavorites), onclick: () => { onlyFavorites = !onlyFavorites; drawBar(); drawGrid(); } }, `${onlyFavorites ? "♥" : "♡"} Любими (${favorites.size})`),
       favorites.size ? h("button", { class: "btn btn-small btn-primary", onclick: sendSelection }, "Изпрати селекция") : null,
-      gallery.downloadEnabled && favPhotos.length ? h("button", { class: "btn btn-small", disabled: busyAll, onclick: () => downloadMany(favPhotos, "Свали любимите") }, "Свали любимите") : null,
-      gallery.downloadEnabled ? h("button", { class: "btn btn-small", disabled: busyAll, onclick: () => downloadMany(photos, "Свали всички снимки") }, "Свали всички") : null,
+      gallery.downloadEnabled && favPhotos.length ? h("button", { class: "btn btn-small", disabled: busy, onclick: () => downloadZip(favPhotos, "Свали любимите (ZIP)", true) }, "Свали любимите") : null,
+      gallery.downloadEnabled ? h("button", { class: "btn btn-small", disabled: busy, onclick: () => downloadZip(photos, "Свали всички снимки (ZIP)", false) }, "Свали всички (ZIP)") : null,
+      busy ? h("span", { class: "zip-status", role: "status" }, p ? `Архив ${p.part}/${p.parts} · ${p.done}/${p.count} · ${fmtBytes(p.bytes)}` : "Подготвяне…") : null,
+      busy ? h("button", { class: "btn btn-small", onclick: () => zip.controller.abort() }, "Откажи") : null,
     ].filter(Boolean));
   }
 
@@ -183,7 +223,8 @@ function render({ gallery, photos }) {
   const stage = h("div", { class: "lb-stage" }, lbImg);
 
   const show = (i) => {
-    lb.index = (i + flat.length) % flat.length;
+    if (!flat.length) { if (lb.dlg.open) lb.dlg.close(); return; }
+    lb.index = ((i % flat.length) + flat.length) % flat.length;
     const p = flat[lb.index];
     lbImg.src = p.displayUrl;
     lbImg.alt = p.filename;
@@ -195,8 +236,10 @@ function render({ gallery, photos }) {
     for (const n of [flat[(lb.index + 1) % flat.length], flat[(lb.index - 1 + flat.length) % flat.length]]) new Image().src = n.displayUrl;
   };
   function openLightbox(i) { if (!flat.length) return; show(i); if (!lb.dlg.open) lb.dlg.showModal(); }
+  // Toggling a favorite can remove the photo from `flat` (favorites-only view): re-show whatever is at the same position.
+  const toggleCurrent = () => { toggleFavorite(flat[lb.index].id); show(lb.index); };
 
-  lbFav.onclick = () => { toggleFavorite(flat[lb.index].id); show(lb.index); };
+  lbFav.onclick = toggleCurrent;
   lbDownload.onclick = () => downloadOne(flat[lb.index]);
   lb.dlg.append(
     h("div", { class: "lb-top" }, lbCount, h("div", { class: "row" }, lbFav, lbDownload, h("button", { "aria-label": "Затвори", onclick: () => lb.dlg.close() }, "✕"))),
@@ -206,7 +249,7 @@ function render({ gallery, photos }) {
   lb.dlg.addEventListener("keydown", (e) => {
     if (e.key === "ArrowRight") show(lb.index + 1);
     else if (e.key === "ArrowLeft") show(lb.index - 1);
-    else if (e.key.toLowerCase() === "f") { toggleFavorite(flat[lb.index].id); show(lb.index); }
+    else if (e.key.toLowerCase() === "f") toggleCurrent();
   });
   lb.dlg.addEventListener("click", (e) => { if (e.target === lb.dlg || e.target === stage) lb.dlg.close(); });
   let startX = null;
@@ -228,6 +271,9 @@ function render({ gallery, photos }) {
   root.replaceChildren(hero, bar, main, lb.dlg);
   drawBar();
   drawGrid();
+
+  // Warn before leaving while an archive is being written.
+  addEventListener("beforeunload", (e) => { if (zip) { e.preventDefault(); e.returnValue = ""; } });
 }
 
 load();
