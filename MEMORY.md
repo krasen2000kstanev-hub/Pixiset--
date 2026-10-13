@@ -50,23 +50,43 @@ The role's trust policy must match that string exactly (CloudTrail
 - Cognito: Authorization Code + PKCE (no implicit grant), `AllowAdminCreateUserOnly`.
   Team = every user of the pool; add colleagues in the Cognito console.
 - All team members see all galleries (shared workspace).
-- `lookup()` falls back to a table scan until `slug-index` exists; remove the
-  fallback once the stack update has been applied everywhere.
+- `lookup()` / `auditOf()` fall back to a table scan until `slug-index` and
+  `galleryId-createdAt-index` exist; remove the fallbacks once the stack update is live.
+- ZIP is built **in the visitor's browser** (`docs/zip.js`, `docs/archive.js`): the API
+  only returns presigned original URLs (`POST /galleries/{ref}/downloads`, one audit
+  event). Chromium streams one ZIP to a file the visitor picks; other browsers get
+  parts of at most 500 MB. No server compute, no IAM changes. Store-only ZIP, no ZIP64.
+- Manual order: `POST /admin/galleries/{id}/order {order:[ids]}`. The given photos keep
+  the *slots* they occupy and are refilled in the new order (`planReorder`), so a
+  per-set reorder never moves other sets' photos. New uploads get an epoch-ms
+  `sortOrder` and therefore land at the end.
+- Public gallery responses are paged (800 photos, `nextCursor`); the page loops until done.
+- Abuse limits per IP and gallery (from the audit table): 8 wrong passwords / 10 min,
+  10 selections / h, 20 archive requests / h.
+- Deleting a gallery removes everything under `originals|thumbs|display/{id}/`, including
+  uploads whose row was never created.
+- Admin access tokens refresh silently with the Cognito refresh token (sessionStorage).
+- Tests never touch AWS: `handler.mjs` exports `__useAws()` and the flow tests inject
+  in-memory DynamoDB/S3 fakes. Do not use `vi.mock` for the SDK: the Lambda resolves its
+  own copy from `lambda/node_modules`, so module mocks silently miss.
 
 ## Verification
 
-- `npm test`: 31 tests (Lambda handler, validation, access, S3 keys, Next lib).
+- `npm test`: 57 tests (Lambda unit + 18 handler flows on in-memory fakes, ZIP format
+  read back by an independent parser, archive planning, Next lib).
 - `npx tsc --noEmit` passes.
-- `docs/` was smoke-tested against a local mock API (gallery, lightbox, favorites,
-  selection, password gate, admin list/detail/upload/settings/activity).
+- `docs/` smoke-tested in a browser against a local mock API: gallery, lightbox,
+  favorites, selection, password gate, both ZIP modes (CRC-checked), admin list/detail,
+  upload, settings, activity, reorder by arrows and drag & drop, per-set reorder.
 - CloudFormation change set previewed: no resource replacement.
 
 ## Known limits / next work
 
-1. "Download all" downloads files one after another; a server-side ZIP is not built.
+1. ZIP of very large galleries depends on the visitor's browser and connection; there
+   is no server-built archive (it would need an SQS/S3-event worker and IAM changes).
 2. No email notifications (would need an SES IAM policy, which the deploy role cannot add).
-3. No photo reordering UI (order = natural filename order at upload time).
-4. No rate limiting on gallery passwords beyond API Gateway defaults.
-5. Public routes are open to any origin the browser allows; CORS is limited to the
-   GitHub Pages origin via the `AllowedOrigin` template parameter.
-6. Old galleries' photos without `displayKey` fall back to the original in the lightbox.
+3. Reordering is limited to the photos currently shown in the admin grid ("show more" first
+   to move a photo beyond the first 60).
+4. Old galleries' photos without `displayKey` fall back to the original in the lightbox.
+5. One API response per gallery page contains presigned URLs for 800 photos; galleries
+   above ~20 000 photos would need server-side filtering by set.

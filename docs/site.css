@@ -147,3 +147,16 @@ input[type=file]{padding:8px}
 .lb-nav{position:absolute;top:50%;transform:translateY(-50%);width:48px;height:64px;font-size:28px;padding:0}
 .lb-prev{left:8px}.lb-next{right:8px}
 .lb-count{font-size:13px;color:rgba(255,255,255,.7)}
+
+/* manual ordering */
+.photo[draggable=true]{cursor:grab}
+.photo.dragging{opacity:.35}
+.photo.drop-target{outline:2px dashed var(--accent);outline-offset:-2px}
+.photo-actions .btn-small{min-width:36px}
+.photo-body select{min-height:36px;padding:6px 8px;font-size:13px}
+
+/* sets + archive progress */
+.set-chip{display:inline-flex;align-items:center;gap:6px}
+.chip-x{min-height:0;width:20px;height:20px;padding:0;border:0;border-radius:50%;background:transparent;color:inherit;font-size:16px;line-height:1}
+.chip-x:hover{background:var(--surface-hover)}
+.zip-status{font-size:13px;color:var(--text-2);white-space:nowrap}

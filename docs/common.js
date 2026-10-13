@@ -27,12 +27,22 @@ export const fmtBytes = (n) => {
 };
 
 export const fmtDate = (value, withTime = false) => {
-  const d = new Date(value);
+  // "2026-09-12" alone parses as UTC midnight and can render as the previous day west of UTC.
+  const d = new Date(/^\d{4}-\d{2}-\d{2}$/.test(String(value)) ? `${value}T12:00:00` : value);
   if (Number.isNaN(d.getTime())) return "";
   return d.toLocaleString("bg-BG", withTime
     ? { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }
     : { day: "numeric", month: "long", year: "numeric" });
 };
+
+/** localStorage/sessionStorage can throw (private mode, blocked cookies); never let that break the page. */
+const safe = (area) => ({
+  get(key) { try { return window[area].getItem(key); } catch { return null; } },
+  set(key, value) { try { window[area].setItem(key, value); } catch { /* ignore */ } },
+  remove(key) { try { window[area].removeItem(key); } catch { /* ignore */ } },
+});
+export const local = safe("localStorage");
+export const session = safe("sessionStorage");
 
 let toasts;
 export function toast(message, kind = "info") {
@@ -67,12 +77,18 @@ export function ask({ title, message, fields = [], ok = "Потвърди", canc
         h("div", { class: "dlg-actions" },
           h("button", { type: "submit", value: "cancel", formnovalidate: true, class: "btn" }, cancel),
           h("button", { type: "submit", value: "ok", class: danger ? "btn btn-danger" : "btn btn-primary" }, ok))));
-    dlg.addEventListener("close", () => {
-      const confirmed = dlg.returnValue === "ok";
+    let settled = false;
+    const finish = (confirmed) => {
+      if (settled) return;
+      settled = true;
       const values = Object.fromEntries(new FormData(dlg.querySelector("form")).entries());
       dlg.remove();
       resolve(confirmed ? values : null);
-    });
+    };
+    // `submit` fires synchronously and only after validation passed; `close` covers Esc and other dismissals.
+    dlg.querySelector("form").addEventListener("submit", (e) => finish(e.submitter?.value === "ok"));
+    dlg.addEventListener("close", () => finish(dlg.returnValue === "ok"));
+    dlg.addEventListener("cancel", () => finish(false));
     document.body.append(dlg);
     dlg.showModal();
     dlg.querySelector("input,textarea")?.focus();
