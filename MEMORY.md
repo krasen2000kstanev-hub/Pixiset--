@@ -23,6 +23,12 @@ Deploy: pushing to branch `client-gallery` runs `.github/workflows/release.yml`
 The deploy role `pixiset-github-actions` has `PowerUserAccess`: it **cannot change
 IAM**, so keep `serverless.yml` free of new IAM roles/policies.
 
+GitHub presents this repo's OIDC subject with immutable IDs:
+`repo:krasen2000kstanev-hub@323143824/Pixiset--@1361371202:ref:refs/heads/client-gallery`.
+The role's trust policy must match that string exactly (CloudTrail
+`AssumeRoleWithWebIdentity` AccessDenied events show the real `sub`). A job that uses
+`environment:` gets `...:environment:<name>` instead, so the AWS job has no environment.
+
 ## Data model (DynamoDB, on-demand)
 
 - Galleries: `id`, `slug` (unique, `slug-index`), `title`, `description`, `displayDate`,
