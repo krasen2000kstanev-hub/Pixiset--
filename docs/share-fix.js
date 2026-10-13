@@ -1,1 +1,0 @@
-document.addEventListener('click',async e=>{if(!e.target.matches('[data-share]'))return;e.stopImmediatePropagation();const img=e.target.closest('.lightbox').querySelector('img'),url=img.dataset.original||img.src;try{await navigator.share({title:document.title,url})}catch{await navigator.clipboard.writeText(url);alert('Линкът към снимката е копиран')}},true);

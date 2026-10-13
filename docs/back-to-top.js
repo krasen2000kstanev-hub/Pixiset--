@@ -1,1 +1,0 @@
-const topButton=document.createElement('button');topButton.id='topButton';topButton.textContent='↑ Горе';topButton.onclick=()=>scrollTo({top:0,behavior:'smooth'});document.body.append(topButton);addEventListener('scroll',()=>topButton.style.display=scrollY>500?'block':'none');
