@@ -172,16 +172,18 @@ async function scanAll(params) {
   return items;
 }
 
-/** First item where attr === value. Uses the index; falls back to a full scan until the index is deployed. */
-async function lookup(table, index, attr, value) {
+/** Up to `limit` items where attr === value. Uses the index; falls back to a full scan until the index is deployed. */
+async function lookupMany(table, index, attr, value, limit) {
   try {
-    const r = await db.send(new QueryCommand({ TableName: table, IndexName: index, KeyConditionExpression: "#a = :v", ExpressionAttributeNames: { "#a": attr }, ExpressionAttributeValues: { ":v": value }, Limit: 1 }));
-    return r.Items?.[0];
+    const r = await db.send(new QueryCommand({ TableName: table, IndexName: index, KeyConditionExpression: "#a = :v", ExpressionAttributeNames: { "#a": attr }, ExpressionAttributeValues: { ":v": value }, Limit: limit }));
+    return r.Items || [];
   } catch (error) {
     if (error.name !== "ValidationException") throw error; // ponytail: remove fallback once indexes are live everywhere
-    return (await scanAll({ TableName: table, FilterExpression: "#a = :v", ExpressionAttributeNames: { "#a": attr }, ExpressionAttributeValues: { ":v": value } }))[0];
+    return (await scanAll({ TableName: table, FilterExpression: "#a = :v", ExpressionAttributeNames: { "#a": attr }, ExpressionAttributeValues: { ":v": value } })).slice(0, limit);
   }
 }
+
+const lookup = async (table, index, attr, value) => (await lookupMany(table, index, attr, value, 1))[0];
 
 const getItem = async (table, id) => (await db.send(new GetCommand({ TableName: table, Key: { id } }))).Item;
 const photosOf = (galleryId) => queryAll({ TableName: T.photos(), IndexName: "galleryId-sortOrder-index", KeyConditionExpression: "galleryId = :g", ExpressionAttributeValues: { ":g": galleryId } });
@@ -297,7 +299,11 @@ function body(event) {
 // ---------- public routes ----------
 
 async function findGallery(ref) {
-  return ref.slug !== undefined ? lookup(T.galleries(), "slug-index", "slug", ref.slug) : getItem(T.galleries(), ref.id);
+  if (ref.slug === undefined) return getItem(T.galleries(), ref.id);
+  // Galleries created by the first app version can share a slug. Serving "the first match" would show
+  // one client another client's gallery, so an ambiguous slug resolves to nothing; ids always work.
+  const matches = await lookupMany(T.galleries(), "slug-index", "slug", ref.slug, 2);
+  return matches.length === 1 ? matches[0] : undefined;
 }
 
 async function openGallery(event, ref) {

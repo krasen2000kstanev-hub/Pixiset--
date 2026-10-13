@@ -417,3 +417,29 @@ describe("photos from the first app version", () => {
     expect((await call(ev("POST", "/admin/photos/nope/renditions", { team: true, body: {} }))).status).toBe(404);
   });
 });
+
+describe("slugs shared by galleries from the first app version", () => {
+  it("never serves one client another client's gallery", async () => {
+    seedGallery({ id: "g1", slug: "1" });
+    seedGallery({ id: "g2", slug: "1", title: "Other client" });
+    seedPhoto(1);
+    expect((await call(ev("GET", "/galleries/slug/1"))).status).toBe(404);
+    expect((await call(ev("GET", "/galleries/g1"))).data.gallery.id).toBe("g1"); // ids always resolve
+    expect((await call(ev("GET", "/galleries/g2"))).data.gallery.title).toBe("Other client");
+  });
+
+  it("serves a slug that is unique", async () => {
+    seedGallery({ id: "g1", slug: "wedding" });
+    seedGallery({ id: "g2", slug: "other" });
+    expect((await call(ev("GET", "/galleries/slug/wedding"))).data.gallery.id).toBe("g1");
+  });
+
+  it("refuses to give a gallery a slug another gallery already uses", async () => {
+    seedGallery({ id: "g1", slug: "wedding" });
+    seedGallery({ id: "g2", slug: "other" });
+    const patch = (id, slug) => call(ev("PATCH", `/admin/galleries/${id}`, { team: true, body: { slug } }));
+    expect((await patch("g2", "wedding")).data.error).toBe("slug-taken");
+    expect((await patch("g2", "other-new")).status).toBe(200);
+    expect((await patch("g1", "wedding")).status).toBe(200); // keeping its own slug is fine
+  });
+});

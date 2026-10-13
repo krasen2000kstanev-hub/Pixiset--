@@ -134,7 +134,10 @@ function showLogin(message) {
       h("button", { class: "btn btn-primary", onclick: startLogin }, "Вход")));
 }
 
-const clientUrl = (g) => `${location.origin}${location.pathname.replace(/admin\.html$/, "")}gallery.html?slug=${encodeURIComponent(g.slug)}`;
+const galleryPage = () => `${location.origin}${location.pathname.replace(/admin\.html$/, "")}gallery.html`;
+/** Slugs from the first app version are not unique; the API refuses an ambiguous slug, so such galleries get an id link. */
+const slugIsShared = (g, all) => all.some((x) => x.id !== g.id && x.slug === g.slug);
+const clientUrl = (g, all = []) => `${galleryPage()}?${slugIsShared(g, all) || !g.slug ? `id=${encodeURIComponent(g.id)}` : `slug=${encodeURIComponent(g.slug)}`}`;
 
 const statusChip = (g) => h("span", { class: `chip ${g.status === "PUBLISHED" ? "published" : "draft"}` }, g.status === "PUBLISHED" ? "Публикувана" : "Чернова");
 
@@ -198,7 +201,8 @@ async function detailScreen(id) {
   root.replaceChildren(h("p", { class: "muted" }, "Зареждане…"));
   const [list, photoData] = await Promise.all([run(() => api("/admin/galleries")), run(() => api(`/admin/galleries/${id}/photos`))]);
   if (!list || !photoData) return;
-  let gallery = list.galleries.find((g) => g.id === id);
+  let all = list.galleries;
+  let gallery = all.find((g) => g.id === id);
   if (!gallery) { toast("Галерията не е намерена.", "error"); location.hash = "#/"; return; }
   let photos = photoData.photos;
   let tab = "photos";
@@ -217,11 +221,12 @@ async function detailScreen(id) {
   };
   const reload = async () => {
     const [l, p] = await Promise.all([run(() => api("/admin/galleries")), run(() => api(`/admin/galleries/${id}/photos`))]);
-    if (l && p && alive) { gallery = l.galleries.find((g) => g.id === id) || gallery; photos = p.photos; drawHeader(); drawTab(); }
+    if (l && p && alive) { all = l.galleries; gallery = all.find((g) => g.id === id) || gallery; photos = p.photos; drawHeader(); drawTab(); }
   };
 
   function drawHeader() {
-    const link = clientUrl(gallery);
+    const link = clientUrl(gallery, all);
+    const shared = slugIsShared(gallery, all);
     header.replaceChildren(
       h("div", { class: "topbar" },
         h("a", { href: "#/", class: "btn" }, "← Всички галерии"),
@@ -236,6 +241,7 @@ async function detailScreen(id) {
           h("button", { class: "btn", onclick: async () => { try { await navigator.clipboard.writeText(link); toast("Линкът е копиран", "success"); } catch { toast("Копирането не успя — маркирай линка ръчно.", "error"); } } }, "Копирай"),
           h("a", { class: "btn", href: link, target: "_blank", rel: "noopener" }, "Отвори"),
           h("button", { class: "btn", onclick: changeSlug }, "Промени адреса")),
+        shared ? h("p", { class: "muted", style: "margin:12px 0 0" }, `Адресът „${gallery.slug}“ се ползва и от друга галерия, затова линкът е с ID. Натисни „Промени адреса“, за да получиш кратък уникален линк.`) : null,
         gallery.status !== "PUBLISHED" ? h("p", { class: "muted", style: "margin:12px 0 0" }, "Галерията е чернова — клиентите не я виждат, докато не я публикуваш.") : null),
       h("div", { class: "tabs", role: "tablist" },
         [["photos", `Снимки (${photos.length})`], ["settings", "Настройки"], ["activity", "Активност"]].map(([key, label]) =>
