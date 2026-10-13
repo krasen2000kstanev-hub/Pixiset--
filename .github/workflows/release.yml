@@ -15,11 +15,11 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  release:
+  # No `environment:` here on purpose. A job with an environment gets an OIDC
+  # subject of `...:environment:<name>`, which the AWS role's trust policy
+  # (`...:ref:refs/heads/client-gallery`) does not accept.
+  lambda:
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
 
@@ -53,6 +53,16 @@ jobs:
             --parameter-overrides AppVersion="$GITHUB_SHA" \
             --no-confirm-changeset \
             --no-fail-on-empty-changeset
+
+  # Pages is published only after the API it talks to is live.
+  pages:
+    needs: lambda
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
 
       - uses: actions/configure-pages@v5
 
