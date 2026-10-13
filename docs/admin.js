@@ -434,7 +434,7 @@ async function detailScreen(id) {
     } },
       h("h2", {}, "Основни"),
       h("label", { class: "field" }, h("span", {}, "Заглавие"), h("input", { name: "title", value: gallery.title || "", required: true, maxLength: 160 })),
-      h("label", { class: "field" }, h("span", {}, "Дата на събитието"), h("input", { name: "displayDate", type: "date", value: gallery.displayDate || "", required: true })),
+      h("label", { class: "field" }, h("span", {}, "Дата на събитието"), h("input", { name: "displayDate", type: "date", value: gallery.displayDate || String(gallery.createdAt || "").slice(0, 10), required: true })),
       h("label", { class: "field" }, h("span", {}, "Описание"), h("textarea", { name: "description", rows: 3, maxLength: 2000, value: gallery.description || "" })),
       h("h2", { style: "margin-top:24px" }, "Достъп на клиента"),
       h("label", { class: "field" }, h("span", {}, gallery.hasPassword ? "Нова парола (остави празно, за да запазиш текущата)" : "Парола (по избор)"), h("input", { name: "password", type: "text", minLength: 4, maxLength: 120, autocomplete: "off", placeholder: gallery.hasPassword ? "•••• (зададена)" : "Без парола" })),
