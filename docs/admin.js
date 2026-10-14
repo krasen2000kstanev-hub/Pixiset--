@@ -414,12 +414,13 @@ async function detailScreen(id) {
       h("button", { class: "btn btn-primary", onclick: runUpgrade }, `Подготви ${legacy.length} снимки`),
       upgradeStatus) : null;
 
-    body.replaceChildren(upgradePanel, h("div", { class: "panel" },
+    // replaceChildren() would print a literal "null" for the panels that are absent
+    body.replaceChildren(...[upgradePanel, h("div", { class: "panel" },
       h("div", { class: "row", style: "margin-bottom:12px" }, h("span", { class: "muted" }, "Качи в сет:"), uploadSet, input),
       drop, status),
       h("div", { class: "row", style: "margin-bottom:8px" }, filter, h("span", { class: "muted" }, `${photos.length} снимки · ${fmtBytes(photos.reduce((n, p) => n + (p.size || 0), 0))}`)),
       photos.length > 1 ? h("p", { class: "muted", style: "margin:0 0 16px;font-size:13px" }, "Влачи снимките или ползвай стрелките, за да смениш реда. Така ги вижда и клиентът.") : null,
-      grid, more);
+      grid, more].filter(Boolean));
     drawGrid();
   }
 
