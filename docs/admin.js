@@ -128,7 +128,7 @@ addEventListener("beforeunload", (e) => { if (activeUpload) { e.preventDefault()
 function showLogin(message) {
   root.replaceChildren(
     h("section", { class: "login" },
-      h("p", { class: "brand" }, "Pixiset / Team"),
+      h("p", { class: "brand" }, "PicSpace / Team"),
       h("h1", {}, "Админ галерия"),
       h("p", {}, message || "Влез като член на екипа, за да управляваш галериите."),
       h("button", { class: "btn btn-primary", onclick: startLogin }, "Вход")));
@@ -164,7 +164,7 @@ async function listScreen() {
 
   root.replaceChildren(
     h("div", { class: "topbar" },
-      h("div", {}, h("p", { class: "brand" }, "Pixiset / Team"), h("h1", {}, "Галерии")),
+      h("div", {}, h("p", { class: "brand" }, "PicSpace / Team"), h("h1", {}, "Галерии")),
       h("div", { class: "row" },
         h("button", { class: "btn btn-primary", onclick: () => run(newGallery) }, "Нова галерия"),
         h("button", { class: "btn", onclick: logout }, "Изход"))),
