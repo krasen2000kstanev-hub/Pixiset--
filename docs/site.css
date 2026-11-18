@@ -106,9 +106,9 @@ input[type=file]{padding:8px}
 /* ---------- client gallery ---------- */
 .hero{position:relative;min-height:min(78vh,760px);background:var(--surface-alt);display:grid;align-items:end;overflow:hidden}
 .hero img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
-.hero::after{content:"";position:absolute;inset:0;background:linear-gradient(180deg,rgba(0,0,0,.05) 35%,rgba(0,0,0,.65) 100%)}
-.hero-copy{position:relative;z-index:1;color:#fff;text-align:center;padding:0 6vw 10vh}
-.hero-copy h1{font-size:clamp(2.2rem,7vw,5.5rem);letter-spacing:.06em;text-transform:uppercase}
+.hero::after{content:"";position:absolute;inset:0;background:linear-gradient(180deg,rgba(0,0,0,0) 45%,rgba(0,0,0,.8) 100%)}
+.hero-copy{position:relative;z-index:1;color:#fff;text-align:center;padding:0 6vw 5vh;text-shadow:0 2px 12px rgba(0,0,0,.5)}
+.hero-copy h1{font-size:clamp(1.5rem,4.5vw,3.6rem);letter-spacing:.06em;text-transform:uppercase;overflow-wrap:anywhere}
 .hero-copy p{margin:12px 0 24px;letter-spacing:.24em;text-transform:uppercase;font-size:13px}
 .hero .btn{border-color:#fff;background:rgba(0,0,0,.25);color:#fff;letter-spacing:.14em;text-transform:uppercase}
 .hero .btn:hover{background:#fff;color:#332b25}
@@ -122,6 +122,7 @@ input[type=file]{padding:8px}
 /* row-major justified layout, pure CSS: flex-grow carries each photo's aspect ratio */
 .justified{--row:260px;display:flex;flex-wrap:wrap;gap:6px}
 .justified::after{content:"";flex-grow:1000}
+.tile.big{flex:1 1 100%!important;height:min(72vh,56vw)}
 .tile{position:relative;height:var(--row);border-radius:2px;overflow:hidden;background:var(--surface-alt)}
 .tile .open{display:block;width:100%;height:100%;min-height:0;padding:0;border:0;border-radius:0;background:none;cursor:zoom-in}
 .tile img{width:100%;height:100%;object-fit:cover;transition:opacity .2s}
@@ -129,7 +130,7 @@ input[type=file]{padding:8px}
 .tile:hover .fav,.tile:focus-within .fav,.tile .fav.on{opacity:1}
 .tile .fav.on{color:#ffb4a8}
 @media(hover:none){.tile .fav{opacity:1}}
-@media(max-width:600px){.gallery-main{padding:8px}.justified{--row:170px;gap:3px}.gallery-bar .inner{padding:8px}}
+@media(max-width:600px){.hero-copy h1{letter-spacing:.02em}.tile.big{height:62vw}.gallery-main{padding:8px}.justified{--row:170px;gap:3px}.gallery-bar .inner{padding:8px}}
 .state{min-height:70vh;display:grid;place-content:center;gap:12px;text-align:center;padding:24px}
 .state p{color:var(--text-2);max-width:420px;margin:0 auto}
 .skeleton{display:flex;flex-wrap:wrap;gap:6px;padding:16px}

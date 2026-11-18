@@ -198,13 +198,15 @@ function render({ gallery, photos }) {
       if (!items.length) return null;
       return h("section", {},
         setNames.length > 1 ? h("h2", { class: "set-title" }, name, " ", h("small", {}, `(${items.length})`)) : null,
-        h("div", { class: "justified" }, items.map((p) => {
+        h("div", { class: "justified" }, items.map((p, i) => {
           const index = flat.push(p) - 1;
           const ratio = p.width && p.height ? p.width / p.height : 1.5;
           const on = favorites.has(p.id);
-          return h("div", { class: "tile", style: `flex:${(ratio * 100).toFixed(2)} 1 calc(var(--row) * ${ratio.toFixed(4)})` },
+          // Every 9th landscape photo spans the full row to break up the grid; it gets the larger display image.
+          const big = items.length > 8 && i % 9 === 4 && ratio >= 1.2;
+          return h("div", { class: big ? "tile big" : "tile", style: `flex:${(ratio * 100).toFixed(2)} 1 calc(var(--row) * ${ratio.toFixed(4)})` },
             h("button", { class: "open", "aria-label": `Отвори снимка ${p.filename}`, onclick: () => openLightbox(index) },
-              h("img", { src: p.url, alt: "", loading: "lazy", decoding: "async", width: p.width || undefined, height: p.height || undefined })),
+              h("img", { src: big ? p.displayUrl : p.url, alt: "", loading: "lazy", decoding: "async", width: p.width || undefined, height: p.height || undefined })),
             h("button", { class: `fav${on ? " on" : ""}`, dataset: { fav: p.id }, "aria-pressed": String(on), "aria-label": "Любима", onclick: () => toggleFavorite(p.id) }, on ? "♥" : "♡"));
         })));
     }).filter(Boolean);
