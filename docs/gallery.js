@@ -270,7 +270,11 @@ function render({ gallery, photos }) {
       gallery.description ? h("p", { style: "text-transform:none;letter-spacing:normal;max-width:560px;margin:0 auto 24px" }, gallery.description) : null,
       h("a", { class: "btn", href: "#photos" }, "Виж галерията")));
 
-  root.replaceChildren(hero, bar, main, lb.dlg);
+  // Small round "back to top" button; shows only once the cover is out of view, sits bottom-left away from the tile hearts.
+  const toTop = h("button", { class: "to-top", "aria-label": "Към началото", hidden: true, onclick: () => scrollTo({ top: 0, behavior: "smooth" }) }, "↑");
+  new IntersectionObserver(([e]) => { toTop.hidden = e.isIntersecting; }).observe(hero);
+
+  root.replaceChildren(hero, bar, main, toTop, lb.dlg);
   drawBar();
   drawGrid();
 

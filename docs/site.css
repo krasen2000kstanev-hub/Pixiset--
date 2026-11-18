@@ -123,6 +123,9 @@ input[type=file]{padding:8px}
 .justified{--row:260px;display:flex;flex-wrap:wrap;gap:6px}
 .justified::after{content:"";flex-grow:1000}
 .tile.big{flex:1 1 100%!important;height:min(72vh,56vw)}
+.to-top{position:fixed;left:max(12px,env(safe-area-inset-left));bottom:max(12px,env(safe-area-inset-bottom));z-index:20;width:44px;height:44px;padding:0;border:1px solid rgba(255,255,255,.35);border-radius:50%;background:rgba(0,0,0,.45);backdrop-filter:blur(6px);color:#fff;font-size:20px;line-height:1;opacity:.75;cursor:pointer}
+.to-top:hover,.to-top:focus-visible{opacity:1}
+.to-top[hidden]{display:none}
 .tile{position:relative;height:var(--row);border-radius:2px;overflow:hidden;background:var(--surface-alt)}
 .tile .open{display:block;width:100%;height:100%;min-height:0;padding:0;border:0;border-radius:0;background:none;cursor:zoom-in}
 .tile img{width:100%;height:100%;object-fit:cover;transition:opacity .2s}
